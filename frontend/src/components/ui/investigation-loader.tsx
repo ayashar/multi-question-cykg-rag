@@ -99,14 +99,14 @@ export function InvestigationLoader({
   return (
     <div
       className={cn(
-        "w-full max-w-2xl mx-auto rounded-lg border border-neutral-300 bg-background p-6 shadow-xs select-none",
+        "w-full max-w-2xl mx-auto rounded-[3px] border border-neutral-300 bg-background p-6 shadow-xs select-none",
         className
       )}
       {...props}
     >
       <div className="flex items-center justify-between border-b border-neutral-200 pb-4 mb-5">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-md bg-primary-100 flex items-center justify-center text-primary-800">
+          <div className="w-9 h-9 rounded-[3px] bg-primary-100 flex items-center justify-center text-primary-800">
             <Brain className="w-5 h-5 animate-pulse" />
           </div>
           <div>
@@ -114,15 +114,15 @@ export function InvestigationLoader({
               Deep Investigation in Progress
             </h3>
             {caseId ? (
-              <p className="font-b3 text-neutral-600">Case ID: {caseId}</p>
+              <p className="font-b3 text-neutral-700">Case ID: {caseId}</p>
             ) : (
-              <p className="font-b3 text-neutral-600">
+              <p className="font-b3 text-neutral-700">
                 Multi-agent LangGraph workflow running (est. 15-55s)
               </p>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2 bg-neutral-100 px-3 py-1.5 rounded-full">
+        <div className="flex items-center gap-2 bg-neutral-100 px-3 py-1.5 rounded-full border border-neutral-200">
           <Clock className="w-4 h-4 text-neutral-700 animate-spin" />
           <span className="font-b3 font-mono font-medium text-neutral-900">
             {formatTime(elapsed)}
@@ -131,9 +131,9 @@ export function InvestigationLoader({
       </div>
 
       <div className="mb-6">
-        <div className="flex justify-between font-b3 text-neutral-700 mb-1.5 font-medium">
+        <div className="flex justify-between font-b3 text-neutral-800 mb-1.5 font-medium">
           <span>{INVESTIGATION_STAGES[currentStageIndex].label}</span>
-          <span>{progressPercent}%</span>
+          <span className="font-mono">{progressPercent}%</span>
         </div>
         <div className="w-full h-2 rounded-full bg-neutral-200 overflow-hidden">
           <div
@@ -154,18 +154,18 @@ export function InvestigationLoader({
             <div
               key={stage.id}
               className={cn(
-                "flex items-start gap-3 p-3 rounded-md transition-all duration-300",
+                "flex items-start gap-3 p-3 rounded-[3px] transition-all duration-300",
                 isCurrent && "bg-primary-100/40 border border-primary-300",
-                isDone && "opacity-75 bg-neutral-100/60",
+                isDone && "opacity-80 bg-neutral-100/60",
                 isPending && "opacity-40"
               )}
             >
               <div
                 className={cn(
                   "w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5",
-                  isDone && "bg-green-100 text-green-700",
-                  isCurrent && "bg-primary-600 text-white animate-pulse",
-                  isPending && "bg-neutral-200 text-neutral-500"
+                  isDone && "bg-green-100 text-green-500",
+                  isCurrent && "bg-primary-600 text-neutral-100 animate-pulse",
+                  isPending && "bg-neutral-200 text-neutral-600"
                 )}
               >
                 {isDone ? (
@@ -180,19 +180,19 @@ export function InvestigationLoader({
                     className={cn(
                       "font-b2 font-medium truncate",
                       isCurrent && "text-primary-900 font-bold",
-                      isDone && "text-neutral-800",
-                      isPending && "text-neutral-500"
+                      isDone && "text-neutral-900",
+                      isPending && "text-neutral-600"
                     )}
                   >
                     {stage.label}
                   </p>
                   {isCurrent && (
-                    <span className="font-b4 uppercase tracking-wider px-2 py-0.5 rounded-xs bg-primary-600 text-white font-semibold">
+                    <span className="font-b5 uppercase tracking-wider px-2 py-0.5 rounded-[3px] bg-primary-600 text-neutral-100 font-bold">
                       Running
                     </span>
                   )}
                 </div>
-                <p className="font-b3 text-neutral-600 mt-0.5 leading-snug">
+                <p className="font-b3 text-neutral-700 mt-0.5 leading-snug">
                   {stage.description}
                 </p>
               </div>
