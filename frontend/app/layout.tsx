@@ -3,6 +3,7 @@ import { Google_Sans, Google_Sans_Code } from "next/font/google";
 import "./globals.css";
 import Sidebar from "@/components/ui/sidebar";
 import Navbar from "@/components/ui/navbar";
+import { GlobalLoadingBar } from "@/components/ui/global-loading-bar";
 
 const googleSans = Google_Sans({
   variable: "--font-google-sans",
@@ -30,6 +31,7 @@ export default function RootLayout({
       className={`${googleSans.variable} ${googleSansCode.variable} h-full antialiased`}
     >
       <body className="min-h-screen flex bg-background text-foreground font-sans">
+        <GlobalLoadingBar />
         <Sidebar />
         <div className="flex-1 flex flex-col min-w-0 min-h-screen">
           <Navbar />

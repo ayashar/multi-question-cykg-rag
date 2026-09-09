@@ -113,6 +113,116 @@ export interface ApiConfig {
   apiKey?: string;
 }
 
+export type ApiEndpointKey =
+  | "getCases"
+  | "investigateCase"
+  | "getAttackGraph"
+  | "investigateTimeRange"
+  | "sendChatMessage"
+  | "getChatTranscript"
+  | "getIngestionConfig"
+  | "updateIngestionConfig"
+  | "getIngestionStatus"
+  | "apiRequest";
+
+export interface ApiLoadingState {
+  isLoading: boolean;
+  activeCalls: number;
+  activeEndpoints: Record<string, number>;
+  isInvestigating: boolean;
+  investigationCaseId?: string;
+  investigationStartTime?: number;
+}
+
+let activeCallsCount = 0;
+const activeEndpointMap = new Map<string, number>();
+let activeInvestigationCount = 0;
+let currentInvestigationCaseId: string | undefined = undefined;
+let currentInvestigationStartTime: number | undefined = undefined;
+
+type LoadingListener = (state: ApiLoadingState) => void;
+const loadingListeners = new Set<LoadingListener>();
+
+let currentLoadingState: ApiLoadingState = {
+  isLoading: false,
+  activeCalls: 0,
+  activeEndpoints: {},
+  isInvestigating: false,
+  investigationCaseId: undefined,
+  investigationStartTime: undefined,
+};
+
+function updateAndNotifyLoading(): void {
+  currentLoadingState = {
+    isLoading: activeCallsCount > 0,
+    activeCalls: activeCallsCount,
+    activeEndpoints: Object.fromEntries(activeEndpointMap.entries()),
+    isInvestigating: activeInvestigationCount > 0,
+    investigationCaseId: currentInvestigationCaseId,
+    investigationStartTime: currentInvestigationStartTime,
+  };
+  for (const listener of loadingListeners) {
+    listener(currentLoadingState);
+  }
+}
+
+export function getApiLoadingState(): ApiLoadingState {
+  return currentLoadingState;
+}
+
+export function subscribeApiLoading(listener: LoadingListener): () => void {
+  loadingListeners.add(listener);
+  listener(currentLoadingState);
+  return () => {
+    loadingListeners.delete(listener);
+  };
+}
+
+export function startApiLoading(
+  endpointKey: ApiEndpointKey,
+  options?: { isInvestigation?: boolean; caseId?: string }
+): void {
+  activeCallsCount++;
+  activeEndpointMap.set(
+    endpointKey,
+    (activeEndpointMap.get(endpointKey) ?? 0) + 1
+  );
+
+  if (options?.isInvestigation) {
+    activeInvestigationCount++;
+    if (currentInvestigationStartTime === undefined) {
+      currentInvestigationStartTime = Date.now();
+      currentInvestigationCaseId = options.caseId;
+    }
+  }
+
+  updateAndNotifyLoading();
+}
+
+export function stopApiLoading(
+  endpointKey: ApiEndpointKey,
+  options?: { isInvestigation?: boolean }
+): void {
+  activeCallsCount = Math.max(0, activeCallsCount - 1);
+
+  const currentCount = activeEndpointMap.get(endpointKey) ?? 1;
+  if (currentCount <= 1) {
+    activeEndpointMap.delete(endpointKey);
+  } else {
+    activeEndpointMap.set(endpointKey, currentCount - 1);
+  }
+
+  if (options?.isInvestigation) {
+    activeInvestigationCount = Math.max(0, activeInvestigationCount - 1);
+    if (activeInvestigationCount === 0) {
+      currentInvestigationStartTime = undefined;
+      currentInvestigationCaseId = undefined;
+    }
+  }
+
+  updateAndNotifyLoading();
+}
+
 export class ApiClientError extends Error {
   readonly status: number;
   readonly statusText: string;
@@ -204,88 +314,111 @@ export function getLookbackStoreEntries(): Record<string, number> {
 export interface RequestOptions extends Omit<RequestInit, "body"> {
   params?: Record<string, string | number | boolean | undefined | null>;
   body?: unknown;
+  endpointKey?: ApiEndpointKey;
+  isInvestigation?: boolean;
+  caseId?: string;
 }
 
 export async function apiRequest<T>(
   path: string,
   options: RequestOptions = {}
 ): Promise<T> {
-  const { baseUrl, apiKey } = getApiConfig();
-  const { params, body, headers: customHeaders, ...fetchOptions } = options;
-
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  const url = new URL(`${baseUrl}${normalizedPath}`);
-
-  if (params) {
-    for (const [key, value] of Object.entries(params)) {
-      if (value !== undefined && value !== null) {
-        url.searchParams.append(key, String(value));
-      }
-    }
-  }
-
-  const headers = new Headers(customHeaders);
-
-  if (apiKey !== undefined && apiKey !== null) {
-    headers.set("X-API-Key", apiKey);
-  }
-
-  let serializedBody: BodyInit | undefined;
-  if (body !== undefined) {
-    if (typeof body === "string") {
-      serializedBody = body;
-    } else {
-      serializedBody = JSON.stringify(body);
-      if (!headers.has("Content-Type")) {
-        headers.set("Content-Type", "application/json");
-      }
-    }
-  }
-
-  const response = await fetch(url.toString(), {
-    ...fetchOptions,
-    headers,
-    body: serializedBody,
+  const endpointKey = options.endpointKey ?? "apiRequest";
+  startApiLoading(endpointKey, {
+    isInvestigation: options.isInvestigation,
+    caseId: options.caseId,
   });
 
-  if (!response.ok) {
-    let errorDetail = response.statusText;
-    try {
-      const errorJson = await response.json();
-      if (errorJson && typeof errorJson === "object") {
-        if ("detail" in errorJson) {
-          errorDetail =
-            typeof errorJson.detail === "string"
-              ? errorJson.detail
-              : JSON.stringify(errorJson.detail);
-        } else if ("message" in errorJson) {
-          errorDetail = String(errorJson.message);
-        } else {
-          errorDetail = JSON.stringify(errorJson);
+  try {
+    const { baseUrl, apiKey } = getApiConfig();
+    const {
+      params,
+      body,
+      headers: customHeaders,
+      ...fetchOptions
+    } = options;
+    delete (fetchOptions as Record<string, unknown>).endpointKey;
+    delete (fetchOptions as Record<string, unknown>).isInvestigation;
+    delete (fetchOptions as Record<string, unknown>).caseId;
+
+    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+    const url = new URL(`${baseUrl}${normalizedPath}`);
+
+    if (params) {
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null) {
+          url.searchParams.append(key, String(value));
         }
       }
-    } catch {
-      try {
-        const text = await response.text();
-        if (text) {
-          errorDetail = text;
-        }
-      } catch {}
     }
 
-    throw new ApiClientError(
-      response.status,
-      response.statusText,
-      errorDetail,
-      url.toString()
-    );
-  }
+    const headers = new Headers(customHeaders);
 
-  if (response.status === 204) {
-    return undefined as T;
-  }
+    if (apiKey !== undefined && apiKey !== null) {
+      headers.set("X-API-Key", apiKey);
+    }
 
-  return (await response.json()) as T;
+    let serializedBody: BodyInit | undefined;
+    if (body !== undefined) {
+      if (typeof body === "string") {
+        serializedBody = body;
+      } else {
+        serializedBody = JSON.stringify(body);
+        if (!headers.has("Content-Type")) {
+          headers.set("Content-Type", "application/json");
+        }
+      }
+    }
+
+    const response = await fetch(url.toString(), {
+      ...fetchOptions,
+      headers,
+      body: serializedBody,
+    });
+
+    if (!response.ok) {
+      let errorDetail = response.statusText;
+      try {
+        const errorJson = await response.json();
+        if (errorJson && typeof errorJson === "object") {
+          if ("detail" in errorJson) {
+            errorDetail =
+              typeof errorJson.detail === "string"
+                ? errorJson.detail
+                : JSON.stringify(errorJson.detail);
+          } else if ("message" in errorJson) {
+            errorDetail = String(errorJson.message);
+          } else {
+            errorDetail = JSON.stringify(errorJson);
+          }
+        }
+      } catch {
+        try {
+          const text = await response.text();
+          if (text) {
+            errorDetail = text;
+          }
+        } catch {}
+      }
+
+      throw new ApiClientError(
+        response.status,
+        response.statusText,
+        errorDetail,
+        url.toString()
+      );
+    }
+
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
+    return (await response.json()) as T;
+  } finally {
+    stopApiLoading(endpointKey, {
+      isInvestigation: options.isInvestigation,
+    });
+  }
 }
 
 const DEFAULT_LOOKBACK_HOURS = 24.0;
@@ -295,6 +428,7 @@ export async function getCases(params: GetCasesParams = {}): Promise<Case[]> {
 
   const cases = await apiRequest<Case[]>("/cases", {
     method: "GET",
+    endpointKey: "getCases",
     params: {
       lookback_hours: lookbackHours,
     },
@@ -330,6 +464,9 @@ export async function investigateCase(
 
   return apiRequest<TurnRecord>(`/cases/${encodeURIComponent(caseId)}/investigate`, {
     method: "POST",
+    endpointKey: "investigateCase",
+    isInvestigation: true,
+    caseId,
     params: queryParams,
   });
 }
@@ -361,6 +498,7 @@ export async function getAttackGraph(
     `/cases/${encodeURIComponent(caseId)}/attack-graph`,
     {
       method: "GET",
+      endpointKey: "getAttackGraph",
       params: queryParams,
     }
   );
@@ -371,6 +509,8 @@ export async function investigateTimeRange(
 ): Promise<TurnRecord> {
   return apiRequest<TurnRecord>("/investigations/time-range", {
     method: "POST",
+    endpointKey: "investigateTimeRange",
+    isInvestigation: true,
     body: payload,
   });
 }
@@ -390,6 +530,9 @@ export async function sendChatMessage(
     `/investigations/${encodeURIComponent(caseId)}/chat`,
     {
       method: "POST",
+      endpointKey: "sendChatMessage",
+      isInvestigation: true,
+      caseId,
       body: payload,
     }
   );
@@ -400,6 +543,7 @@ export async function getChatTranscript(caseId: string): Promise<TurnRecord[]> {
     `/investigations/${encodeURIComponent(caseId)}/chat`,
     {
       method: "GET",
+      endpointKey: "getChatTranscript",
     }
   );
 }
@@ -407,6 +551,7 @@ export async function getChatTranscript(caseId: string): Promise<TurnRecord[]> {
 export async function getIngestionConfig(): Promise<IngestionConfig> {
   return apiRequest<IngestionConfig>("/ingestion/config", {
     method: "GET",
+    endpointKey: "getIngestionConfig",
   });
 }
 
@@ -415,6 +560,7 @@ export async function updateIngestionConfig(
 ): Promise<IngestionConfig> {
   return apiRequest<IngestionConfig>("/ingestion/config", {
     method: "PUT",
+    endpointKey: "updateIngestionConfig",
     body: config,
   });
 }
@@ -422,5 +568,6 @@ export async function updateIngestionConfig(
 export async function getIngestionStatus(): Promise<IngestionStatus> {
   return apiRequest<IngestionStatus>("/ingestion/status", {
     method: "GET",
+    endpointKey: "getIngestionStatus",
   });
 }

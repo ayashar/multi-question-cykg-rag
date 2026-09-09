@@ -21,6 +21,8 @@ import {
   CaseAttackGraph,
   IngestionConfig,
   IngestionStatus,
+  getApiLoadingState,
+  subscribeApiLoading,
 } from "../index";
 
 interface MockCall {
@@ -518,6 +520,88 @@ describe("API Client Suite", () => {
           );
           return true;
         }
+      );
+    });
+  });
+
+  describe("Universal Loading State Tracking", () => {
+    it("tracks loading state during api calls and resets on resolution", async () => {
+      let capturedLoadingDuringCall = false;
+      let capturedActiveEndpointDuringCall = false;
+
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        lastCall = { url: input.toString(), options: init };
+        const state = getApiLoadingState();
+        capturedLoadingDuringCall = state.isLoading;
+        capturedActiveEndpointDuringCall =
+          (state.activeEndpoints["getCases"] ?? 0) > 0;
+
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => [],
+          text: async () => "[]",
+        } as Response;
+      }) as typeof fetch;
+
+      assert.equal(getApiLoadingState().isLoading, false);
+      await getCases();
+
+      assert.equal(capturedLoadingDuringCall, true);
+      assert.equal(capturedActiveEndpointDuringCall, true);
+      assert.equal(getApiLoadingState().isLoading, false);
+      assert.equal(getApiLoadingState().activeEndpoints["getCases"] ?? 0, 0);
+    });
+
+    it("tracks investigation loading state during investigation calls", async () => {
+      let capturedInvestigating = false;
+
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        lastCall = { url: input.toString(), options: init };
+        capturedInvestigating = getApiLoadingState().isInvestigating;
+
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({
+            case_id: "c-1",
+            turn_index: 1,
+            question: "q",
+            timestamp: "2026-09-09T00:00:00Z",
+            latency_seconds: 1.0,
+          }),
+          text: async () => "{}",
+        } as Response;
+      }) as typeof fetch;
+
+      await investigateCase("c-1", 24);
+
+      assert.equal(capturedInvestigating, true);
+      assert.equal(getApiLoadingState().isInvestigating, false);
+    });
+
+    it("subscribes to loading state updates", () => {
+      let notified = false;
+      const unsubscribe = subscribeApiLoading((state) => {
+        if (state) notified = true;
+      });
+      assert.equal(notified, true);
+      unsubscribe();
+    });
+
+    it("resets loading state when request fails", async () => {
+      setupMockFetch({ detail: "Server error" }, 500, "Internal Server Error");
+
+      await assert.rejects(async () => {
+        await getIngestionStatus();
+      });
+
+      assert.equal(getApiLoadingState().isLoading, false);
+      assert.equal(
+        getApiLoadingState().activeEndpoints["getIngestionStatus"] ?? 0,
+        0
       );
     });
   });
