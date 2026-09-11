@@ -263,7 +263,7 @@ describe("API Client Suite", () => {
         answer: "Detected brute force attack.",
         critical_analysis: "High likelihood of lateral movement.",
         mitigation_suggestions: ["Isolate host", "Reset admin password"],
-        recommended_priority: "critical",
+        recommended_priority: "escalate",
         confidence: "high",
         mitre_techniques: ["T1110"],
         cited_entities: ["host-a", "admin"],
@@ -278,7 +278,7 @@ describe("API Client Suite", () => {
       assert.equal(res.case_id, "c-100");
       assert.equal(res.turn_index, 1);
       assert.equal(res.answer, "Detected brute force attack.");
-      assert.equal(res.recommended_priority, "critical");
+      assert.equal(res.recommended_priority, "escalate");
       assert.deepEqual(res.mitigation_suggestions, [
         "Isolate host",
         "Reset admin password",
@@ -301,6 +301,8 @@ describe("API Client Suite", () => {
             id: "host:host-a",
             type: "host",
             label: "host-a",
+            timestamp: null,
+            rule_level: null,
           },
         ],
         edges: [
@@ -333,7 +335,7 @@ describe("API Client Suite", () => {
         answer: "Range analyzed.",
         critical_analysis: null,
         mitigation_suggestions: [],
-        recommended_priority: "low",
+        recommended_priority: "ignore",
         confidence: "medium",
         mitre_techniques: [],
         cited_entities: [],
@@ -402,7 +404,7 @@ describe("API Client Suite", () => {
           answer: "Initial diagnosis",
           critical_analysis: null,
           mitigation_suggestions: [],
-          recommended_priority: "medium",
+          recommended_priority: "monitor",
           confidence: "high",
           mitre_techniques: [],
           cited_entities: [],

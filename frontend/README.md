@@ -2,6 +2,32 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+### Investigation API
+
+The frontend proxies `/backend/*` to `http://127.0.0.1:8000` by default, avoiding
+browser CORS issues. Set server-side `INVESTIGATION_API_URL` to change that
+destination, and `NEXT_PUBLIC_INVESTIGATION_API_KEY` when the API requires a
+key. Mock cases are used only when `NEXT_PUBLIC_USE_MOCK=true`; request failures
+otherwise remain visible.
+
+Import endpoint functions from `@/api`. The shared client attaches the key,
+tracks pending requests, and preserves each case's first discovery lookback
+in session storage (with an in-memory fallback).
+
+For new screens, render `ApiErrorView` for request errors and wrap each returned
+report or transcript item in `TurnResult` so a non-null `turn.error` renders as
+a pipeline failure. Use `InvestigationLoader` for estimated investigation stages
+and `useApiLoading` for request state. Only the cases screen is currently wired.
+
+Run checks from this directory:
+
+```bash
+pnpm test
+pnpm exec tsc --noEmit
+pnpm lint
+pnpm build
+```
+
 First, run the development server:
 
 ```bash

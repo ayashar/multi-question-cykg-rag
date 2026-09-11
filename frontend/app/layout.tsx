@@ -1,17 +1,17 @@
 import type { Metadata } from "next";
-import { Google_Sans, Google_Sans_Code } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Sidebar from "@/components/ui/sidebar";
 import Navbar from "@/components/ui/navbar";
 import { GlobalLoadingBar } from "@/components/ui/global-loading-bar";
 import { ScreenErrorBoundary } from "@/components/ui/error-states";
 
-const googleSans = Google_Sans({
+const fontSans = Geist({
   variable: "--font-google-sans",
   subsets: ["latin"],
 });
 
-const googleSansCode = Google_Sans_Code({
+const fontMono = Geist_Mono({
   variable: "--font-google-code",
   subsets: ["latin"],
 });
@@ -29,7 +29,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${googleSans.variable} ${googleSansCode.variable} h-full antialiased`}
+      className={`${fontSans.variable} ${fontMono.variable} h-full antialiased`}
     >
       <body className="min-h-screen flex bg-background text-foreground font-sans">
         <GlobalLoadingBar />

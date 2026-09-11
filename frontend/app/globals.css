@@ -9,7 +9,7 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-google-sans);
-  --font-mono: var(--font-google-sans-code);
+  --font-mono: var(--font-google-code);
 
   --color-neutral-100: #ededed;
   --color-neutral-200: #e8e8e8;

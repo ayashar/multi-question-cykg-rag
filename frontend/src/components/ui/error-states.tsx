@@ -14,7 +14,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getApiConfig, setApiConfig, ApiClientError } from "@/api";
+import { getApiConfig, setApiConfig, getCaseLookback, ApiClientError, type TurnRecord } from "@/api";
 
 export interface BackendUnreachableErrorProps
   extends React.HTMLAttributes<HTMLDivElement> {
@@ -31,7 +31,7 @@ export function BackendUnreachableError({
   const url = endpointUrl || getApiConfig().baseUrl;
 
   return (
-    <div
+    <div role="alert"
       className={cn(
         "w-full max-w-lg mx-auto rounded-[3px] border border-neutral-300 bg-background p-6 shadow-xs select-none text-center",
         className
@@ -86,10 +86,12 @@ export function CaseNotFoundError({
   ...props
 }: CaseNotFoundErrorProps) {
   const hintMatch = errorDetail?.match(/lookback_hours=([0-9.]+)/);
-  const currentLookback = hintMatch ? hintMatch[1] : (lookbackHours ?? 24);
+  const isLookbackError = /lookback_hours/i.test(errorDetail ?? "");
+  const currentLookback = Math.max(Number(hintMatch?.[1]) || 0, lookbackHours ?? 0, caseId ? getCaseLookback(caseId) ?? 0 : 0) || 24;
+  const expandedLookback = Math.max(336, currentLookback * 2);
 
   return (
-    <div
+    <div role="alert"
       className={cn(
         "w-full max-w-xl mx-auto rounded-[3px] border border-yellow-300 bg-yellow-100/35 p-6 shadow-xs select-none",
         className
@@ -102,10 +104,10 @@ export function CaseNotFoundError({
         </div>
         <div className="flex-1">
           <h3 className="font-h6 text-yellow-500 font-bold">
-            Case Not Found in Lookback Window
+            {isLookbackError ? "Case Not Found in Lookback Window" : "Requested Investigation Data Not Found"}
           </h3>
           <p className="font-b3 text-neutral-800 mt-1 leading-normal">
-            Cases are dynamically clustered from alerts in Neo4j. Historical replays (like AIT-ADS) fall outside the default lookback window.
+            {isLookbackError ? "Use the same or a wider window than when this case was first listed." : "Check the backend details below for the next step."}
           </p>
         </div>
       </div>
@@ -119,14 +121,14 @@ export function CaseNotFoundError({
             </code>
           </div>
         )}
-        <div className="font-b3 text-neutral-800">
+        {isLookbackError && <div className="font-b3 text-neutral-800">
           <span className="font-semibold text-neutral-700 mr-2">Current Lookback:</span>
           <span className="font-mono font-semibold text-black-600">{currentLookback} hours</span>
-        </div>
+        </div>}
         {errorDetail && (
           <div className="pt-2.5 border-t border-yellow-200">
             <span className="font-b4 font-bold text-yellow-500 uppercase tracking-wider block mb-1.5">
-              Backend Lookback Hint
+              Backend Details
             </span>
             <p className="font-b4 text-neutral-900 leading-relaxed font-mono bg-yellow-100/50 border border-yellow-200 p-2.5 rounded-[3px]">
               {errorDetail}
@@ -146,14 +148,14 @@ export function CaseNotFoundError({
             Back to Cases
           </button>
         )}
-        {onRetryWithLookback && (
+        {isLookbackError && onRetryWithLookback && (
           <button
             type="button"
-            onClick={() => onRetryWithLookback(336)}
+            onClick={() => onRetryWithLookback(expandedLookback)}
             className="inline-flex items-center justify-center gap-2 rounded-[3px] bg-primary-800 hover:bg-primary-700 text-neutral-100 font-b3 py-2 px-3.5 transition-colors cursor-pointer"
           >
             <Calendar className="w-4 h-4" />
-            Expand to 14 Days (336h)
+            Expand to {expandedLookback} hours
           </button>
         )}
       </div>
@@ -178,7 +180,7 @@ export function PipelineFailureError({
   const [showDetails, setShowDetails] = React.useState(false);
 
   return (
-    <div
+    <div role="alert"
       className={cn(
         "w-full max-w-xl mx-auto rounded-[3px] border-2 border-red-300 bg-red-100/25 p-6 shadow-xs select-none",
         className
@@ -240,7 +242,7 @@ export function PipelineFailureError({
             className="inline-flex items-center justify-center gap-2 rounded-[3px] bg-red-400 hover:bg-red-500 text-neutral-100 font-b3 py-2 px-3.5 transition-colors cursor-pointer"
           >
             <RefreshCw className="w-4 h-4" />
-            Retry Pipeline Run
+            Retry Request
           </button>
         )}
       </div>
@@ -269,12 +271,11 @@ export function ApiKeyAuthError({
     e.preventDefault();
     setApiConfig({ apiKey: apiKeyInput.trim() });
     setSaved(true);
-    if (onSuccess) onSuccess();
-    if (onRetry) onRetry();
+    (onRetry ?? onSuccess)?.();
   };
 
   return (
-    <div
+    <div role="alert"
       className={cn(
         "w-full max-w-md mx-auto rounded-[3px] border border-neutral-300 bg-background p-6 shadow-xs select-none",
         className
@@ -293,10 +294,11 @@ export function ApiKeyAuthError({
 
       <form onSubmit={handleSaveAndRetry} className="space-y-4">
         <div>
-          <label className="block font-b3 font-semibold text-neutral-900 mb-1.5">
+          <label htmlFor="api-key" className="block font-b3 font-semibold text-neutral-900 mb-1.5">
             X-API-Key
           </label>
           <input
+            id="api-key"
             type="password"
             value={apiKeyInput}
             onChange={(e) => setApiKeyInput(e.target.value)}
@@ -337,6 +339,7 @@ export function getErrorCategory(error: unknown): ErrorCategory {
     if (error.status === 401) return "401";
     if (error.status === 404) return "404";
     if (error.status >= 500) return "500";
+    return "generic";
   }
 
   const msg = error instanceof Error ? error.message : String(error);
@@ -387,7 +390,6 @@ export function ApiErrorView({
   if (category === "401") {
     return (
       <ApiKeyAuthError
-        onSuccess={onRetry}
         onRetry={onRetry}
         className={className}
         {...props}
@@ -431,7 +433,7 @@ export function ApiErrorView({
   }
 
   return (
-    <div
+    <div role="alert"
       className={cn(
         "w-full max-w-lg mx-auto rounded-[3px] border border-neutral-300 bg-background p-6 shadow-xs select-none text-center",
         className
@@ -461,6 +463,17 @@ export function ApiErrorView({
       )}
     </div>
   );
+}
+
+/** Wrap each report/transcript turn so HTTP 200 pipeline errors cannot look successful. */
+export function TurnResult({ turn, children, onRetry }: {
+  turn: TurnRecord;
+  children: React.ReactNode;
+  onRetry?: () => void;
+}) {
+  return turn.error !== null
+    ? <PipelineFailureError caseId={turn.case_id} error={turn.error} onRetry={onRetry} />
+    : <>{children}</>;
 }
 
 export interface ScreenErrorBoundaryProps {

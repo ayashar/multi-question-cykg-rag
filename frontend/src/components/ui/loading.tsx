@@ -22,7 +22,7 @@ export function Spinner({
   ...props
 }: SpinnerProps) {
   return (
-    <div className={cn("inline-flex items-center gap-2.5", className)} {...props}>
+    <div role="status" aria-label={label ?? "Loading"} className={cn("inline-flex items-center gap-2.5", className)} {...props}>
       <div
         className={cn(
           "rounded-full border-neutral-300 border-t-primary-600 animate-spin shrink-0",

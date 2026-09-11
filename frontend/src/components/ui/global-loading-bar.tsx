@@ -14,6 +14,8 @@ export function GlobalLoadingBar({ className }: GlobalLoadingBarProps) {
 
   return (
     <div
+      role="status"
+      aria-label="Loading API data"
       className={cn(
         "fixed top-0 left-0 right-0 z-50 h-1 bg-neutral-200 overflow-hidden",
         className

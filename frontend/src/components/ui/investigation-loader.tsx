@@ -54,7 +54,6 @@ export interface InvestigationLoaderProps
   extends React.HTMLAttributes<HTMLDivElement> {
   startTime?: number;
   caseId?: string;
-  onCancel?: () => void;
 }
 
 export function InvestigationLoader({
@@ -98,6 +97,8 @@ export function InvestigationLoader({
 
   return (
     <div
+      role="status"
+      aria-live="polite"
       className={cn(
         "w-full max-w-2xl mx-auto rounded-[3px] border border-neutral-300 bg-background p-6 shadow-xs select-none",
         className
@@ -111,7 +112,7 @@ export function InvestigationLoader({
           </div>
           <div>
             <h3 className="font-h7 text-neutral-1000 font-semibold">
-              Deep Investigation in Progress
+              Investigation in Progress (Estimated Stages)
             </h3>
             {caseId ? (
               <p className="font-b3 text-neutral-700">Case ID: {caseId}</p>
@@ -133,7 +134,7 @@ export function InvestigationLoader({
       <div className="mb-6">
         <div className="flex justify-between font-b3 text-neutral-800 mb-1.5 font-medium">
           <span>{INVESTIGATION_STAGES[currentStageIndex].label}</span>
-          <span className="font-mono">{progressPercent}%</span>
+          <span className="font-mono">Estimated {progressPercent}%</span>
         </div>
         <div className="w-full h-2 rounded-full bg-neutral-200 overflow-hidden">
           <div
@@ -143,6 +144,7 @@ export function InvestigationLoader({
         </div>
       </div>
 
+      <p className="font-b3 text-neutral-700 mb-3">Stages are time-based estimates, not live backend progress. Initial investigations typically take 15–55 seconds; follow-ups may finish sooner.</p>
       <div className="space-y-3">
         {INVESTIGATION_STAGES.map((stage, idx) => {
           const isDone = idx < currentStageIndex;
@@ -188,7 +190,7 @@ export function InvestigationLoader({
                   </p>
                   {isCurrent && (
                     <span className="font-b5 uppercase tracking-wider px-2 py-0.5 rounded-[3px] bg-primary-600 text-neutral-100 font-bold">
-                      Running
+                      Estimated
                     </span>
                   )}
                 </div>

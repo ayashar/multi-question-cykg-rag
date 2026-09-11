@@ -1,0 +1,1247 @@
+[
+  {
+    "case_id": "case-64ab51a40bbd",
+    "alert_ids": [
+      "ait-russellmitchell-86601-25383",
+      "ait-russellmitchell-20101-25425",
+      "ait-russellmitchell-86601-33173",
+      "ait-russellmitchell-20101-33174",
+      "ait-russellmitchell-86601-33175",
+      "ait-russellmitchell-20101-33176",
+      "ait-russellmitchell-31101-25397",
+      "ait-russellmitchell-31101-25398",
+      "ait-russellmitchell-30305-25437",
+      "ait-russellmitchell-31101-25483",
+      "ait-russellmitchell-31101-25482",
+      "ait-russellmitchell-30305-25504",
+      "ait-russellmitchell-20101-25514",
+      "ait-russellmitchell-20101-25518",
+      "ait-russellmitchell-30305-25526",
+      "ait-russellmitchell-86601-25432",
+      "ait-russellmitchell-20101-25445",
+      "ait-russellmitchell-86601-25533",
+      "ait-russellmitchell-20101-25538",
+      "ait-russellmitchell-86601-25539",
+      "ait-russellmitchell-86601-33177",
+      "ait-russellmitchell-20101-33178",
+      "ait-russellmitchell-20101-25381",
+      "ait-russellmitchell-86601-25382",
+      "ait-russellmitchell-20101-25410",
+      "ait-russellmitchell-31101-25403",
+      "ait-russellmitchell-31101-25401",
+      "ait-russellmitchell-86601-25430",
+      "ait-russellmitchell-20101-25431",
+      "ait-russellmitchell-86601-25434",
+      "ait-russellmitchell-31101-25595",
+      "ait-russellmitchell-31101-25897",
+      "ait-russellmitchell-31151-26379",
+      "ait-russellmitchell-31101-26301",
+      "ait-russellmitchell-31101-26334",
+      "ait-russellmitchell-31101-26187",
+      "ait-russellmitchell-31101-26564",
+      "ait-russellmitchell-31101-26849",
+      "ait-russellmitchell-31101-26815",
+      "ait-russellmitchell-31101-27117",
+      "ait-russellmitchell-31101-27305",
+      "ait-russellmitchell-31101-27820",
+      "ait-russellmitchell-31101-27818",
+      "ait-russellmitchell-31101-27708",
+      "ait-russellmitchell-31101-27943",
+      "ait-russellmitchell-31101-28329",
+      "ait-russellmitchell-31101-28299",
+      "ait-russellmitchell-31101-28359",
+      "ait-russellmitchell-31151-28654",
+      "ait-russellmitchell-31101-28482",
+      "ait-russellmitchell-31151-28642",
+      "ait-russellmitchell-31101-28504",
+      "ait-russellmitchell-31101-29004",
+      "ait-russellmitchell-31101-29305",
+      "ait-russellmitchell-31101-29934",
+      "ait-russellmitchell-31101-30188",
+      "ait-russellmitchell-31101-30285",
+      "ait-russellmitchell-31101-30327",
+      "ait-russellmitchell-31101-30414",
+      "ait-russellmitchell-31101-30293",
+      "ait-russellmitchell-31101-30667",
+      "ait-russellmitchell-31101-30859",
+      "ait-russellmitchell-31101-30934",
+      "ait-russellmitchell-31101-31186",
+      "ait-russellmitchell-31101-30954",
+      "ait-russellmitchell-31101-31139",
+      "ait-russellmitchell-31151-31094",
+      "ait-russellmitchell-31101-31495",
+      "ait-russellmitchell-31101-31456",
+      "ait-russellmitchell-31101-31557",
+      "ait-russellmitchell-31101-31858",
+      "ait-russellmitchell-31101-31517",
+      "ait-russellmitchell-31101-32604",
+      "ait-russellmitchell-31101-32655",
+      "ait-russellmitchell-31101-32886",
+      "ait-russellmitchell-31101-32709",
+      "ait-russellmitchell-31101-32746",
+      "ait-russellmitchell-31101-32875",
+      "ait-russellmitchell-31101-32800",
+      "ait-russellmitchell-31101-33167",
+      "ait-russellmitchell-31151-25489"
+    ],
+    "hosts": [
+      "10.143.2.4",
+      "172.19.128.1",
+      "172.19.130.106",
+      "172.19.130.4",
+      "172.19.130.68",
+      "172.19.131.174"
+    ],
+    "src_ips": [
+      "10.143.2.4",
+      "172.19.130.4",
+      "172.19.131.174",
+      "192.168.230.122",
+      "192.168.230.4"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1046",
+      "T1204.002",
+      "T1595.002"
+    ],
+    "sigma_matched_rules": [
+      "Network/Port Scan Detected",
+      "Program Execution in Suspicious Folder"
+    ],
+    "alert_count": 81,
+    "first_seen": "2022-01-24T03:56:58Z",
+    "last_seen": "2022-01-24T04:00:28Z",
+    "max_rule_level": 10,
+    "noteworthy_alert_count": 13,
+    "urgency_score": 66.7
+  },
+  {
+    "case_id": "case-4b1dbace19bc",
+    "alert_ids": [
+      "ait-russellmitchell-9701-38734",
+      "ait-russellmitchell-9701-38744",
+      "ait-russellmitchell-9701-38852",
+      "ait-russellmitchell-9701-38893",
+      "ait-russellmitchell-9701-38953",
+      "ait-russellmitchell-9701-39000",
+      "ait-russellmitchell-9701-38999",
+      "ait-russellmitchell-9701-39009",
+      "ait-russellmitchell-9701-39087",
+      "ait-russellmitchell-52507-39150",
+      "ait-russellmitchell-9701-39257",
+      "ait-russellmitchell-9701-39332"
+    ],
+    "hosts": [
+      "mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1078"
+    ],
+    "sigma_matched_rules": [
+      "Successful Login With Valid Account"
+    ],
+    "alert_count": 12,
+    "first_seen": "2022-01-24T13:59:07Z",
+    "last_seen": "2022-01-24T14:49:53Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 11,
+    "urgency_score": 55.0
+  },
+  {
+    "case_id": "case-b2e0561190e5",
+    "alert_ids": [
+      "ait-russellmitchell-5304-33187",
+      "ait-russellmitchell-5501-33188",
+      "ait-russellmitchell-5402-33189",
+      "ait-russellmitchell-5402-33190",
+      "ait-russellmitchell-5501-33191",
+      "ait-russellmitchell-5502-33192"
+    ],
+    "hosts": [
+      "intranet-server"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1078",
+      "T1204.002",
+      "T1548.003"
+    ],
+    "sigma_matched_rules": [
+      "Program Execution in Suspicious Folder",
+      "Successful Login With Valid Account",
+      "Successful Privilege Escalation via sudo to root"
+    ],
+    "alert_count": 6,
+    "first_seen": "2022-01-24T04:37:40Z",
+    "last_seen": "2022-01-24T04:38:06Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 5,
+    "urgency_score": 49.0
+  },
+  {
+    "case_id": "case-3bd4f3cb1025",
+    "alert_ids": [
+      "ait-russellmitchell-9701-6973",
+      "ait-russellmitchell-9701-7310",
+      "ait-russellmitchell-9701-7507"
+    ],
+    "hosts": [
+      "davey-mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1078"
+    ],
+    "sigma_matched_rules": [
+      "Successful Login With Valid Account"
+    ],
+    "alert_count": 3,
+    "first_seen": "2022-01-21T16:47:17Z",
+    "last_seen": "2022-01-21T18:33:21Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 3,
+    "urgency_score": 44.5
+  },
+  {
+    "case_id": "case-8a89ad5a8f71",
+    "alert_ids": [
+      "ait-russellmitchell-9701-7185",
+      "ait-russellmitchell-9701-7331"
+    ],
+    "hosts": [
+      "mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1078"
+    ],
+    "sigma_matched_rules": [
+      "Successful Login With Valid Account"
+    ],
+    "alert_count": 2,
+    "first_seen": "2022-01-21T17:16:29Z",
+    "last_seen": "2022-01-21T17:52:04Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 2,
+    "urgency_score": 31.3
+  },
+  {
+    "case_id": "case-e4279354a171",
+    "alert_ids": [
+      "ait-russellmitchell-9701-38500",
+      "ait-russellmitchell-9701-38951"
+    ],
+    "hosts": [
+      "davey-mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1078"
+    ],
+    "sigma_matched_rules": [
+      "Successful Login With Valid Account"
+    ],
+    "alert_count": 2,
+    "first_seen": "2022-01-24T13:35:08Z",
+    "last_seen": "2022-01-24T14:21:56Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 2,
+    "urgency_score": 31.3
+  },
+  {
+    "case_id": "case-28849263102f",
+    "alert_ids": [
+      "ait-russellmitchell-52507-25369",
+      "ait-russellmitchell-52507-25370",
+      "ait-russellmitchell-52507-25371",
+      "ait-russellmitchell-52507-25372",
+      "ait-russellmitchell-52507-25373",
+      "ait-russellmitchell-52507-25374",
+      "ait-russellmitchell-52507-33181",
+      "ait-russellmitchell-52507-33182",
+      "ait-russellmitchell-52507-33183",
+      "ait-russellmitchell-52507-33184",
+      "ait-russellmitchell-52507-33185",
+      "ait-russellmitchell-52507-33186"
+    ],
+    "hosts": [
+      "mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 12,
+    "first_seen": "2022-01-24T03:32:09Z",
+    "last_seen": "2022-01-24T04:32:49Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 20.0
+  },
+  {
+    "case_id": "case-4ebafe147712",
+    "alert_ids": [
+      "ait-russellmitchell-52507-10016",
+      "ait-russellmitchell-9701-10365"
+    ],
+    "hosts": [
+      "davey-mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1078"
+    ],
+    "sigma_matched_rules": [
+      "Successful Login With Valid Account"
+    ],
+    "alert_count": 2,
+    "first_seen": "2022-01-22T10:04:02Z",
+    "last_seen": "2022-01-22T10:15:10Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 1,
+    "urgency_score": 19.7
+  },
+  {
+    "case_id": "case-de50f06bfec6",
+    "alert_ids": [
+      "ait-russellmitchell-86601-38709",
+      "ait-russellmitchell-86601-38844",
+      "ait-russellmitchell-20101-38901",
+      "ait-russellmitchell-86601-38911",
+      "ait-russellmitchell-86601-38927",
+      "ait-russellmitchell-20101-39247"
+    ],
+    "hosts": [
+      "172.19.130.68"
+    ],
+    "src_ips": [
+      "172.19.130.4",
+      "172.19.130.68"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 6,
+    "first_seen": "2022-01-24T13:57:40Z",
+    "last_seen": "2022-01-24T14:47:06Z",
+    "max_rule_level": 6,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 19.0
+  },
+  {
+    "case_id": "case-2228554631d4",
+    "alert_ids": [
+      "ait-russellmitchell-86601-37"
+    ],
+    "hosts": [
+      "10.143.0.103"
+    ],
+    "src_ips": [
+      "10.143.0.103"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1071"
+    ],
+    "sigma_matched_rules": [
+      "Suspicious Outbound Policy-Violation Connection"
+    ],
+    "alert_count": 1,
+    "first_seen": "2022-01-21T00:17:54Z",
+    "last_seen": "2022-01-21T00:17:54Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 1,
+    "urgency_score": 18.2
+  },
+  {
+    "case_id": "case-31b2617d8e75",
+    "alert_ids": [
+      "ait-russellmitchell-86601-40558"
+    ],
+    "hosts": [
+      "172.19.128.1"
+    ],
+    "src_ips": [
+      "192.168.230.4"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1071"
+    ],
+    "sigma_matched_rules": [
+      "Suspicious Outbound Policy-Violation Connection"
+    ],
+    "alert_count": 1,
+    "first_seen": "2022-01-24T17:12:28Z",
+    "last_seen": "2022-01-24T17:12:28Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 1,
+    "urgency_score": 18.2
+  },
+  {
+    "case_id": "case-8358bf20ad25",
+    "alert_ids": [
+      "ait-russellmitchell-9701-3087"
+    ],
+    "hosts": [
+      "mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1078"
+    ],
+    "sigma_matched_rules": [
+      "Successful Login With Valid Account"
+    ],
+    "alert_count": 1,
+    "first_seen": "2022-01-21T10:45:57Z",
+    "last_seen": "2022-01-21T10:45:57Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 1,
+    "urgency_score": 18.2
+  },
+  {
+    "case_id": "case-60a1373679dd",
+    "alert_ids": [
+      "ait-russellmitchell-9701-5957"
+    ],
+    "hosts": [
+      "mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1078"
+    ],
+    "sigma_matched_rules": [
+      "Successful Login With Valid Account"
+    ],
+    "alert_count": 1,
+    "first_seen": "2022-01-21T15:19:05Z",
+    "last_seen": "2022-01-21T15:19:05Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 1,
+    "urgency_score": 18.2
+  },
+  {
+    "case_id": "case-6b993f092d41",
+    "alert_ids": [
+      "ait-russellmitchell-9701-13035"
+    ],
+    "hosts": [
+      "mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1078"
+    ],
+    "sigma_matched_rules": [
+      "Successful Login With Valid Account"
+    ],
+    "alert_count": 1,
+    "first_seen": "2022-01-22T13:37:07Z",
+    "last_seen": "2022-01-22T13:37:07Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 1,
+    "urgency_score": 18.2
+  },
+  {
+    "case_id": "case-abd1f190612c",
+    "alert_ids": [
+      "ait-russellmitchell-9701-13934"
+    ],
+    "hosts": [
+      "mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1078"
+    ],
+    "sigma_matched_rules": [
+      "Successful Login With Valid Account"
+    ],
+    "alert_count": 1,
+    "first_seen": "2022-01-22T14:37:14Z",
+    "last_seen": "2022-01-22T14:37:14Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 1,
+    "urgency_score": 18.2
+  },
+  {
+    "case_id": "case-0b08354ae7ae",
+    "alert_ids": [
+      "ait-russellmitchell-9701-23723"
+    ],
+    "hosts": [
+      "mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1078"
+    ],
+    "sigma_matched_rules": [
+      "Successful Login With Valid Account"
+    ],
+    "alert_count": 1,
+    "first_seen": "2022-01-23T17:29:08Z",
+    "last_seen": "2022-01-23T17:29:08Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 1,
+    "urgency_score": 18.2
+  },
+  {
+    "case_id": "case-90d8e8333b43",
+    "alert_ids": [
+      "ait-russellmitchell-9701-24504"
+    ],
+    "hosts": [
+      "mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1078"
+    ],
+    "sigma_matched_rules": [
+      "Successful Login With Valid Account"
+    ],
+    "alert_count": 1,
+    "first_seen": "2022-01-23T19:26:50Z",
+    "last_seen": "2022-01-23T19:26:50Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 1,
+    "urgency_score": 18.2
+  },
+  {
+    "case_id": "case-d9f4f2397de2",
+    "alert_ids": [
+      "ait-russellmitchell-9701-25216"
+    ],
+    "hosts": [
+      "mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1078"
+    ],
+    "sigma_matched_rules": [
+      "Successful Login With Valid Account"
+    ],
+    "alert_count": 1,
+    "first_seen": "2022-01-23T20:28:33Z",
+    "last_seen": "2022-01-23T20:28:33Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 1,
+    "urgency_score": 18.2
+  },
+  {
+    "case_id": "case-4d4c71a486fe",
+    "alert_ids": [
+      "ait-russellmitchell-9701-35903"
+    ],
+    "hosts": [
+      "mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1078"
+    ],
+    "sigma_matched_rules": [
+      "Successful Login With Valid Account"
+    ],
+    "alert_count": 1,
+    "first_seen": "2022-01-24T10:07:04Z",
+    "last_seen": "2022-01-24T10:07:04Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 1,
+    "urgency_score": 18.2
+  },
+  {
+    "case_id": "case-4a800fbbb460",
+    "alert_ids": [
+      "ait-russellmitchell-9701-37561"
+    ],
+    "hosts": [
+      "mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1078"
+    ],
+    "sigma_matched_rules": [
+      "Successful Login With Valid Account"
+    ],
+    "alert_count": 1,
+    "first_seen": "2022-01-24T11:40:34Z",
+    "last_seen": "2022-01-24T11:40:34Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 1,
+    "urgency_score": 18.2
+  },
+  {
+    "case_id": "case-f13733c3daf9",
+    "alert_ids": [
+      "ait-russellmitchell-9701-4163"
+    ],
+    "hosts": [
+      "morris-mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1078"
+    ],
+    "sigma_matched_rules": [
+      "Successful Login With Valid Account"
+    ],
+    "alert_count": 1,
+    "first_seen": "2022-01-21T12:31:43Z",
+    "last_seen": "2022-01-21T12:31:43Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 1,
+    "urgency_score": 18.2
+  },
+  {
+    "case_id": "case-72eaf017a63b",
+    "alert_ids": [
+      "ait-russellmitchell-9701-9363"
+    ],
+    "hosts": [
+      "morris-mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1078"
+    ],
+    "sigma_matched_rules": [
+      "Successful Login With Valid Account"
+    ],
+    "alert_count": 1,
+    "first_seen": "2022-01-22T09:05:29Z",
+    "last_seen": "2022-01-22T09:05:29Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 1,
+    "urgency_score": 18.2
+  },
+  {
+    "case_id": "case-6fee744accc9",
+    "alert_ids": [
+      "ait-russellmitchell-9701-39223"
+    ],
+    "hosts": [
+      "morris-mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1078"
+    ],
+    "sigma_matched_rules": [
+      "Successful Login With Valid Account"
+    ],
+    "alert_count": 1,
+    "first_seen": "2022-01-24T14:46:30Z",
+    "last_seen": "2022-01-24T14:46:30Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 1,
+    "urgency_score": 18.2
+  },
+  {
+    "case_id": "case-b7b7febfdcbf",
+    "alert_ids": [
+      "ait-russellmitchell-9701-9065"
+    ],
+    "hosts": [
+      "davey-mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1078"
+    ],
+    "sigma_matched_rules": [
+      "Successful Login With Valid Account"
+    ],
+    "alert_count": 1,
+    "first_seen": "2022-01-22T08:37:56Z",
+    "last_seen": "2022-01-22T08:37:56Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 1,
+    "urgency_score": 18.2
+  },
+  {
+    "case_id": "case-602d09bf9c31",
+    "alert_ids": [
+      "ait-russellmitchell-9701-14373"
+    ],
+    "hosts": [
+      "davey-mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [
+      "T1078"
+    ],
+    "sigma_matched_rules": [
+      "Successful Login With Valid Account"
+    ],
+    "alert_count": 1,
+    "first_seen": "2022-01-22T15:10:36Z",
+    "last_seen": "2022-01-22T15:10:36Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 1,
+    "urgency_score": 18.2
+  },
+  {
+    "case_id": "case-0e1eed50cc4b",
+    "alert_ids": [
+      "ait-russellmitchell-86601-17219",
+      "ait-russellmitchell-86601-17261",
+      "ait-russellmitchell-20101-17486"
+    ],
+    "hosts": [
+      "172.19.130.68"
+    ],
+    "src_ips": [
+      "172.19.130.4"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 3,
+    "first_seen": "2022-01-23T08:06:57Z",
+    "last_seen": "2022-01-23T08:41:47Z",
+    "max_rule_level": 6,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 14.5
+  },
+  {
+    "case_id": "case-7f845038a5a6",
+    "alert_ids": [
+      "ait-russellmitchell-20101-10484",
+      "ait-russellmitchell-86601-10587",
+      "ait-russellmitchell-86601-11708"
+    ],
+    "hosts": [
+      "172.19.131.174"
+    ],
+    "src_ips": [
+      "172.19.131.174",
+      "52.21.62.223",
+      "52.214.2.140"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 3,
+    "first_seen": "2022-01-22T10:24:15Z",
+    "last_seen": "2022-01-22T11:01:39Z",
+    "max_rule_level": 6,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 14.5
+  },
+  {
+    "case_id": "case-698559fa0dcc",
+    "alert_ids": [
+      "ait-russellmitchell-20101-39300",
+      "ait-russellmitchell-20101-39381",
+      "ait-russellmitchell-20101-39378"
+    ],
+    "hosts": [
+      "172.19.131.174"
+    ],
+    "src_ips": [
+      "172.19.131.174",
+      "34.238.185.255"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 3,
+    "first_seen": "2022-01-24T14:49:52Z",
+    "last_seen": "2022-01-24T14:49:53Z",
+    "max_rule_level": 6,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 14.5
+  },
+  {
+    "case_id": "case-1a6e7280e51b",
+    "alert_ids": [
+      "ait-russellmitchell-86601-16162",
+      "ait-russellmitchell-20101-16476"
+    ],
+    "hosts": [
+      "172.19.128.1"
+    ],
+    "src_ips": [
+      "192.168.230.4"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 2,
+    "first_seen": "2022-01-23T06:41:33Z",
+    "last_seen": "2022-01-23T06:59:23Z",
+    "max_rule_level": 6,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 13.0
+  },
+  {
+    "case_id": "case-4406adb7a370",
+    "alert_ids": [
+      "ait-russellmitchell-20101-39065",
+      "ait-russellmitchell-20101-39327"
+    ],
+    "hosts": [
+      "172.19.128.1"
+    ],
+    "src_ips": [
+      "192.168.230.4",
+      "34.209.131.4"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 2,
+    "first_seen": "2022-01-24T14:30:16Z",
+    "last_seen": "2022-01-24T14:49:52Z",
+    "max_rule_level": 6,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 13.0
+  },
+  {
+    "case_id": "case-9f660e5c6714",
+    "alert_ids": [
+      "ait-russellmitchell-20101-41254",
+      "ait-russellmitchell-20101-41343"
+    ],
+    "hosts": [
+      "172.19.128.1"
+    ],
+    "src_ips": [
+      "192.168.230.4"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 2,
+    "first_seen": "2022-01-24T20:45:48Z",
+    "last_seen": "2022-01-24T20:57:20Z",
+    "max_rule_level": 6,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 13.0
+  },
+  {
+    "case_id": "case-4bacc71e5f93",
+    "alert_ids": [
+      "ait-russellmitchell-20101-212"
+    ],
+    "hosts": [
+      "172.19.128.1"
+    ],
+    "src_ips": [
+      "52.236.186.216"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 1,
+    "first_seen": "2022-01-21T05:33:08Z",
+    "last_seen": "2022-01-21T05:33:08Z",
+    "max_rule_level": 6,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 11.5
+  },
+  {
+    "case_id": "case-75ebe0619d04",
+    "alert_ids": [
+      "ait-russellmitchell-20101-17359"
+    ],
+    "hosts": [
+      "172.19.128.1"
+    ],
+    "src_ips": [
+      "192.168.230.4"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 1,
+    "first_seen": "2022-01-23T08:25:09Z",
+    "last_seen": "2022-01-23T08:25:09Z",
+    "max_rule_level": 6,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 11.5
+  },
+  {
+    "case_id": "case-1db8a500c56f",
+    "alert_ids": [
+      "ait-russellmitchell-20101-19234"
+    ],
+    "hosts": [
+      "172.19.128.1"
+    ],
+    "src_ips": [
+      "44.201.4.255"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 1,
+    "first_seen": "2022-01-23T11:23:55Z",
+    "last_seen": "2022-01-23T11:23:55Z",
+    "max_rule_level": 6,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 11.5
+  },
+  {
+    "case_id": "case-03a33b400012",
+    "alert_ids": [
+      "ait-russellmitchell-20101-21243"
+    ],
+    "hosts": [
+      "172.19.128.1"
+    ],
+    "src_ips": [
+      "75.2.40.13"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 1,
+    "first_seen": "2022-01-23T13:51:09Z",
+    "last_seen": "2022-01-23T13:51:09Z",
+    "max_rule_level": 6,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 11.5
+  },
+  {
+    "case_id": "case-64ce29fadebd",
+    "alert_ids": [
+      "ait-russellmitchell-20101-36318"
+    ],
+    "hosts": [
+      "172.19.128.1"
+    ],
+    "src_ips": [
+      "81.3.192.66"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 1,
+    "first_seen": "2022-01-24T10:38:41Z",
+    "last_seen": "2022-01-24T10:38:41Z",
+    "max_rule_level": 6,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 11.5
+  },
+  {
+    "case_id": "case-ae2949d45668",
+    "alert_ids": [
+      "ait-russellmitchell-20101-40880"
+    ],
+    "hosts": [
+      "172.19.128.1"
+    ],
+    "src_ips": [
+      "34.209.200.8"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 1,
+    "first_seen": "2022-01-24T19:05:32Z",
+    "last_seen": "2022-01-24T19:05:32Z",
+    "max_rule_level": 6,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 11.5
+  },
+  {
+    "case_id": "case-2d010f1ba1cb",
+    "alert_ids": [
+      "ait-russellmitchell-20101-752"
+    ],
+    "hosts": [
+      "172.19.130.68"
+    ],
+    "src_ips": [
+      "172.19.130.4"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 1,
+    "first_seen": "2022-01-21T06:50:49Z",
+    "last_seen": "2022-01-21T06:50:49Z",
+    "max_rule_level": 6,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 11.5
+  },
+  {
+    "case_id": "case-5052548c54ac",
+    "alert_ids": [
+      "ait-russellmitchell-20101-23788"
+    ],
+    "hosts": [
+      "172.19.130.68"
+    ],
+    "src_ips": [
+      "172.19.130.4"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 1,
+    "first_seen": "2022-01-23T17:35:47Z",
+    "last_seen": "2022-01-23T17:35:47Z",
+    "max_rule_level": 6,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 11.5
+  },
+  {
+    "case_id": "case-5f921a5d5387",
+    "alert_ids": [
+      "ait-russellmitchell-52507-25368",
+      "ait-russellmitchell-52507-33180"
+    ],
+    "hosts": [
+      "morris-mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 2,
+    "first_seen": "2022-01-24T03:25:24Z",
+    "last_seen": "2022-01-24T04:25:24Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 8.0
+  },
+  {
+    "case_id": "case-7c1d15b45396",
+    "alert_ids": [
+      "ait-russellmitchell-52507-25367",
+      "ait-russellmitchell-52507-33179"
+    ],
+    "hosts": [
+      "davey-mail"
+    ],
+    "src_ips": [],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 2,
+    "first_seen": "2022-01-24T03:25:14Z",
+    "last_seen": "2022-01-24T04:25:14Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 8.0
+  },
+  {
+    "case_id": "case-79b72a520a11",
+    "alert_ids": [
+      "ait-russellmitchell-86601-1276"
+    ],
+    "hosts": [
+      "172.19.128.1"
+    ],
+    "src_ips": [
+      "192.168.230.4"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 1,
+    "first_seen": "2022-01-21T08:21:30Z",
+    "last_seen": "2022-01-21T08:21:30Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 6.5
+  },
+  {
+    "case_id": "case-7c0726b3729a",
+    "alert_ids": [
+      "ait-russellmitchell-86601-9150"
+    ],
+    "hosts": [
+      "172.19.128.1"
+    ],
+    "src_ips": [
+      "54.186.128.121"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 1,
+    "first_seen": "2022-01-22T08:50:48Z",
+    "last_seen": "2022-01-22T08:50:48Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 6.5
+  },
+  {
+    "case_id": "case-ff77cfd23c0a",
+    "alert_ids": [
+      "ait-russellmitchell-86601-25009"
+    ],
+    "hosts": [
+      "172.19.128.1"
+    ],
+    "src_ips": [
+      "54.177.62.236"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 1,
+    "first_seen": "2022-01-23T19:50:57Z",
+    "last_seen": "2022-01-23T19:50:57Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 6.5
+  },
+  {
+    "case_id": "case-39f71bb6f420",
+    "alert_ids": [
+      "ait-russellmitchell-86601-33754"
+    ],
+    "hosts": [
+      "172.19.128.1"
+    ],
+    "src_ips": [
+      "192.168.230.4"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 1,
+    "first_seen": "2022-01-24T08:17:55Z",
+    "last_seen": "2022-01-24T08:17:55Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 6.5
+  },
+  {
+    "case_id": "case-85275835e734",
+    "alert_ids": [
+      "ait-russellmitchell-86601-34001"
+    ],
+    "hosts": [
+      "172.19.130.68"
+    ],
+    "src_ips": [
+      "172.19.130.68"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 1,
+    "first_seen": "2022-01-24T08:32:24Z",
+    "last_seen": "2022-01-24T08:32:24Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 6.5
+  },
+  {
+    "case_id": "case-d3c89f788682",
+    "alert_ids": [
+      "ait-russellmitchell-86601-37897"
+    ],
+    "hosts": [
+      "172.19.130.68"
+    ],
+    "src_ips": [
+      "172.19.130.68"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 1,
+    "first_seen": "2022-01-24T12:16:18Z",
+    "last_seen": "2022-01-24T12:16:18Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 6.5
+  },
+  {
+    "case_id": "case-60f35588dcde",
+    "alert_ids": [
+      "ait-russellmitchell-86601-19558"
+    ],
+    "hosts": [
+      "172.19.131.174"
+    ],
+    "src_ips": [
+      "199.232.196.124"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 1,
+    "first_seen": "2022-01-23T11:35:26Z",
+    "last_seen": "2022-01-23T11:35:26Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 6.5
+  },
+  {
+    "case_id": "case-86d36bfc8f54",
+    "alert_ids": [
+      "ait-russellmitchell-86601-22293"
+    ],
+    "hosts": [
+      "172.19.131.174"
+    ],
+    "src_ips": [
+      "172.19.131.174"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 1,
+    "first_seen": "2022-01-23T15:16:30Z",
+    "last_seen": "2022-01-23T15:16:30Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 6.5
+  },
+  {
+    "case_id": "case-82cc41e16780",
+    "alert_ids": [
+      "ait-russellmitchell-86601-35492"
+    ],
+    "hosts": [
+      "172.19.131.174"
+    ],
+    "src_ips": [
+      "108.128.212.85"
+    ],
+    "dst_users": [],
+    "mitre_techniques": [],
+    "sigma_matched_rules": [],
+    "alert_count": 1,
+    "first_seen": "2022-01-24T09:39:44Z",
+    "last_seen": "2022-01-24T09:39:44Z",
+    "max_rule_level": 3,
+    "noteworthy_alert_count": 0,
+    "urgency_score": 6.5
+  }
+]

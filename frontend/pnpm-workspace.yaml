@@ -1,3 +1,6 @@
-ignoredBuiltDependencies:
+packages:
+  - '.'
+onlyBuiltDependencies:
   - sharp
   - unrs-resolver
+  - "@next/swc-linux-x64-gnu"
