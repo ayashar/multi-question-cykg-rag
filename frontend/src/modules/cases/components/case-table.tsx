@@ -1,9 +1,11 @@
 "use client";
 
 import { ChevronRight, ChevronLeft } from "lucide-react";
+import Link from "next/link";
+import { getInvestigationHref, rememberInvestigationCase } from "@/modules/investigation/services/investigation-service";
 import { type Case, formatCaseTimeSpan } from "../types";
-import UrgencyIndicator, { getUrgencyStripeColor } from "./UrgencyIndicator";
-import MitreBadges from "./MitreBadges";
+import UrgencyIndicator, { getUrgencyStripeColor } from "./urgency-indicator";
+import MitreBadges from "./mitre-badges";
 import { Button } from "@/components/ui/button";
 
 interface CaseTableProps {
@@ -12,6 +14,8 @@ interface CaseTableProps {
   totalPages: number;
   onNextPage: () => void;
   onPrevPage: () => void;
+  actionLabel?: string;
+  lookbacks?: Record<string, number | undefined>;
 }
 
 export default function CaseTable({
@@ -20,14 +24,14 @@ export default function CaseTable({
   totalPages,
   onNextPage,
   onPrevPage,
+  actionLabel = "Investigate",
+  lookbacks,
 }: CaseTableProps) {
   return (
     <div className="w-full flex flex-col space-y-2">
-      {/* Table Container without outer border */}
       <div className="w-full overflow-x-auto">
         <table className="w-full text-left border-separate border-spacing-y-1 min-w-[760px]">
           <caption className="sr-only">Cases in backend urgency order</caption>
-          {/* Header Row */}
           <thead>
             <tr className="bg-[#8555a3] text-white text-xs font-semibold">
               <th className="py-2.5 px-4 w-44 font-normal rounded-l-[3px]">Urgency</th>
@@ -38,8 +42,6 @@ export default function CaseTable({
               <th className="py-2.5 px-4 w-32 text-right rounded-r-[3px]"></th>
             </tr>
           </thead>
-
-          {/* Body Rows with gap between each row and no borders */}
           <tbody>
             {cases.map((c) => {
               const stripeColor = getUrgencyStripeColor(c.urgency_score);
@@ -56,16 +58,12 @@ export default function CaseTable({
                   key={c.case_id}
                   className="bg-[#b394c4] text-[#241c29] group shadow-2xs"
                 >
-                  {/* Urgency Column with side stripe */}
                   <td className="py-3 px-4 relative rounded-l-[3px] overflow-hidden">
-                    {/* Colored vertical stripe on left */}
                     <span
                       className={`absolute left-0 top-0 bottom-0 w-1 ${stripeColor}`}
                     />
                     <UrgencyIndicator score={c.urgency_score} />
                   </td>
-
-                  {/* Case ID */}
                   <td className="py-3 px-4">
                     <span className="font-mono text-xs text-[#241c29] font-semibold">
                       {c.case_id}
@@ -74,8 +72,6 @@ export default function CaseTable({
                       {formatCaseTimeSpan(c.first_seen, c.last_seen)}
                     </span>
                   </td>
-
-                  {/* Host and User */}
                   <td className="py-3 px-4">
                     <div className="flex flex-col">
                       <span className="text-xs font-semibold text-[#241c29] line-clamp-1">
@@ -86,25 +82,21 @@ export default function CaseTable({
                       </span>
                     </div>
                   </td>
-
-                  {/* Alert Count */}
                   <td className="py-3 px-4 text-center">
                     <span className="font-bold text-base text-[#241c29]">
                       {c.alert_count}
                     </span>
                   </td>
-
-                  {/* MITRE Techniques */}
                   <td className="py-3 px-4">
                     <MitreBadges techniques={c.mitre_techniques} maxVisible={4} />
                   </td>
-
-                  {/* Action */}
                   <td className="py-3 px-4 text-right rounded-r-[3px]">
-                    <button type="button" disabled title="Available when case investigation is implemented" className="inline-flex items-center gap-1 text-xs font-medium text-neutral-1000 cursor-not-allowed">
-                      <span>Investigate</span>
+                    <Link href={getInvestigationHref(c.case_id, lookbacks?.[c.case_id])} onClick={() => rememberInvestigationCase(c)}
+                      aria-label={`${actionLabel} ${c.case_id}`}
+                      className="inline-flex items-center gap-1 rounded-[3px] text-xs font-medium text-neutral-1000 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4">
+                      <span>{actionLabel}</span>
                       <ChevronRight className="w-3.5 h-3.5" />
-                    </button>
+                    </Link>
                   </td>
                 </tr>
               );
@@ -112,8 +104,6 @@ export default function CaseTable({
           </tbody>
         </table>
       </div>
-
-      {/* Pagination Controls with Button component */}
       <div className="flex items-center justify-end gap-2 pt-1">
         <Button
           type="button"

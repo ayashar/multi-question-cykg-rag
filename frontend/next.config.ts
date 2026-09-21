@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  experimental: {
+    // Investigations can exceed the proxy's default 30-second timeout.
+    proxyTimeout: 120_000,
+  },
   rewrites() {
     return [
       {
