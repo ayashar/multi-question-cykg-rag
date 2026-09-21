@@ -1,4 +1,4 @@
-import TimeRangeForm from "@/modules/investigations/components/TimeRangeForm";
+import TimeRangeForm from "@/modules/investigation/components/time-range-form";
 
 export default function TimeSpanPage() {
   return (

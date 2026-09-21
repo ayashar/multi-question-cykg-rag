@@ -7,8 +7,11 @@ import { investigateTimeRange } from "@/api";
 import { Button } from "@/components/ui/button";
 import { ApiErrorView } from "@/components/ui/error-states";
 import { InvestigationLoader } from "@/components/ui/investigation-loader";
-import { validateTimeRange } from "../timeRangeValidation";
-import { cacheInvestigationTurn } from "../services/investigationResultCache";
+import {
+  getInvestigationHref,
+  rememberTimeRangeInvestigation,
+} from "../services/investigation-service";
+import { validateTimeRange } from "../services/time-range-validation";
 
 type ValidationErrors = ReturnType<typeof validateTimeRange>["errors"];
 
@@ -44,8 +47,8 @@ export default function TimeRangeForm() {
     setStartedAt(Date.now());
     try {
       const turn = await investigateTimeRange(validation.payload);
-      cacheInvestigationTurn(turn);
-      router.push(`/investigations/${encodeURIComponent(turn.case_id)}`);
+      rememberTimeRangeInvestigation(validation.payload, turn);
+      router.push(getInvestigationHref(turn.case_id));
     } catch (error) {
       setRequestError(error);
       setIsSubmitting(false);
@@ -59,12 +62,7 @@ export default function TimeRangeForm() {
   }
 
   if (isSubmitting) {
-    return (
-      <InvestigationLoader
-        startTime={startedAt}
-        className="mx-0 max-w-3xl"
-      />
-    );
+    return <InvestigationLoader startTime={startedAt} className="mx-0 max-w-3xl" />;
   }
 
   return (
@@ -76,10 +74,7 @@ export default function TimeRangeForm() {
       >
         <div className="grid gap-4 md:grid-cols-2">
           <div>
-            <label
-              htmlFor="range-start"
-              className="mb-1.5 block font-b3 font-bold uppercase tracking-wide text-primary-1000"
-            >
+            <label htmlFor="range-start" className="mb-1.5 block font-b3 font-bold uppercase tracking-wide text-primary-1000">
               Start
             </label>
             <input
@@ -101,10 +96,7 @@ export default function TimeRangeForm() {
           </div>
 
           <div>
-            <label
-              htmlFor="range-end"
-              className="mb-1.5 block font-b3 font-bold uppercase tracking-wide text-primary-1000"
-            >
+            <label htmlFor="range-end" className="mb-1.5 block font-b3 font-bold uppercase tracking-wide text-primary-1000">
               End
             </label>
             <input

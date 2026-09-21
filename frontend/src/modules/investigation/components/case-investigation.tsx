@@ -10,7 +10,13 @@ import { ApiErrorView, CaseNotFoundError, TurnResult } from "@/components/ui/err
 import { InvestigationLoader } from "@/components/ui/investigation-loader";
 import { recordInvestigatedCase } from "@/modules/cases/services/cases-service";
 import { cn } from "@/lib/utils";
-import { getInvestigationHref, loadInvestigationCase, runCaseInvestigation } from "../services/investigation-service";
+import {
+  getInvestigationHref,
+  getPreparedTimeRangeInvestigation,
+  loadInvestigationCase,
+  rerunPreparedTimeRangeInvestigation,
+  runCaseInvestigation,
+} from "../services/investigation-service";
 import CaseDetails from "./case-details";
 import InvestigationReport, { DownloadReportButton } from "./investigation-report";
 import AttackGraphPreview from "./attack-graph-preview";
@@ -31,22 +37,33 @@ export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: s
   const [startTime, setStartTime] = useState<number>();
   const [attempt, setAttempt] = useState(0);
   const [view, setView] = useState<View>("details");
+  const [isManualTimeRange, setIsManualTimeRange] = useState(false);
   const content = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
     async function investigate() {
       try {
-        const selected = await loadInvestigationCase(caseId, lookbackHours);
+        const prepared = getPreparedTimeRangeInvestigation(caseId);
+        const selected = prepared?.value ?? await loadInvestigationCase(caseId, lookbackHours);
         if (cancelled) return;
         setValue(selected);
+        setIsManualTimeRange(Boolean(prepared));
+        if (prepared) setView("report");
         setStartTime(Date.now());
-        const result = await runCaseInvestigation(selected, lookbackHours);
+        const result = prepared
+          ? attempt === 0
+            ? prepared.turn
+            : (await rerunPreparedTimeRangeInvestigation(caseId)).turn
+          : await runCaseInvestigation(selected, lookbackHours);
         if (cancelled) return;
         if (result.case_id !== caseId) throw new Error("The returned investigation belongs to a different case.");
         setTurn(result);
         if (result.error === null) {
-          recordInvestigatedCase(selected, resolveCaseLookback(caseId, lookbackHours) ?? 336);
+          recordInvestigatedCase(
+            selected,
+            prepared ? undefined : resolveCaseLookback(caseId, lookbackHours) ?? 336,
+          );
         }
       } catch (reason) {
         if (!cancelled) setError(reason instanceof Error ? reason : new Error("Could not investigate this case."));
@@ -82,6 +99,7 @@ export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: s
         <div className="min-w-0">
           <p className="font-b1">INVESTIGATION</p>
           <h1 className="font-h4 text-2xl sm:text-[34px] wrap-anywhere">{caseId}</h1>
+          {isManualTimeRange && <p className="font-b3 text-primary-700">Manual time-range investigation</p>}
           {process.env.NEXT_PUBLIC_USE_MOCK === "true" && <p className="font-b3 text-primary-700">Demo mode · sample data</p>}
         </div>
         {ready && <nav aria-label="Investigation views" className="flex flex-wrap gap-2 sm:gap-3">
@@ -120,7 +138,7 @@ export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: s
       </div>}
 
       <div ref={content} tabIndex={-1} className="space-y-5 outline-none" aria-label={`${views.find((item) => item.id === view)?.label} content`}>
-        {view === "details" && value && <CaseDetails value={value} />}
+        {view === "details" && value && <CaseDetails value={value} manualTimeRange={isManualTimeRange} />}
         {!isLoading && turn && value && <TurnResult turn={turn} onRetry={retry}>
           {view === "report" && <InvestigationReport value={value} turn={turn} />}
           {view === "details" && <div className="grid items-start gap-3 lg:grid-cols-2">

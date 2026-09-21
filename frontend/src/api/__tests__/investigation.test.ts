@@ -1,7 +1,15 @@
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { clearLookbackStore, registerCaseLookback, resetApiConfig, type Case, type TurnRecord } from "@/api";
-import { buildInvestigationReport, getInvestigationHref, loadInvestigationCase, parseLookbackHours, runCaseInvestigation } from "@/modules/investigation/services/investigation-service";
+import {
+  buildInvestigationReport,
+  getInvestigationHref,
+  getPreparedTimeRangeInvestigation,
+  loadInvestigationCase,
+  parseLookbackHours,
+  rememberTimeRangeInvestigation,
+  runCaseInvestigation,
+} from "@/modules/investigation/services/investigation-service";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; clearLookbackStore(); resetApiConfig(); });
@@ -69,4 +77,17 @@ test("case links encode IDs and validate lookback query values", () => {
   assert.equal(getInvestigationHref("case/a?b", 720), "/cases/case%2Fa%3Fb?lookback_hours=720");
   assert.equal(parseLookbackHours("720.5"), 720.5);
   for (const invalid of ["", "0", "-1", "Infinity", "invalid", ["24", "720"], undefined]) assert.equal(parseLookbackHours(invalid), undefined);
+});
+
+test("FR3 prepares manual results for the canonical FR2 case route and report", () => {
+  const range = { start: "2022-01-21T02:00:00Z", end: "2022-01-21T04:00:00Z" };
+  const manualTurn = { ...turn, case_id: "manual-fr3", mitre_techniques: ["T1110"] };
+  const prepared = rememberTimeRangeInvestigation(range, manualTurn);
+
+  assert.equal(getInvestigationHref(manualTurn.case_id), "/cases/manual-fr3");
+  assert.equal(prepared.value.case_id, manualTurn.case_id);
+  assert.equal(prepared.value.first_seen, range.start);
+  assert.equal(prepared.value.last_seen, range.end);
+  assert.deepEqual(prepared.value.mitre_techniques, ["T1110"]);
+  assert.deepEqual(getPreparedTimeRangeInvestigation(manualTurn.case_id), prepared);
 });

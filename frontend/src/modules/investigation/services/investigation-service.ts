@@ -1,17 +1,75 @@
 import {
-  ApiClientError, getApiConfig, getCaseLookback, investigateCase,
-  registerCaseLookback, resolveCaseLookback, type Case, type TurnRecord,
+  ApiClientError, getApiConfig, getCaseLookback, investigateCase, investigateTimeRange,
+  registerCaseLookback, resolveCaseLookback, type Case, type TimeRangeRequest, type TurnRecord,
 } from "@/api";
 import { getCases, getInvestigatedCases } from "@/modules/cases/services/cases-service";
 
 const selectedCases = new Map<string, Case>();
 const pendingInvestigations = new Map<string, Promise<TurnRecord>>();
 const CASE_KEY = "kgcs_selected_case:";
+const TIME_RANGE_KEY = "kgcs_time_range_investigation:";
+
+export interface PreparedTimeRangeInvestigation {
+  value: Case;
+  turn: TurnRecord;
+  range: TimeRangeRequest;
+}
+
+const preparedTimeRangeInvestigations = new Map<string, PreparedTimeRangeInvestigation>();
 
 export function rememberInvestigationCase(value: Case): void {
   selectedCases.set(value.case_id, value);
   try { sessionStorage.setItem(`${CASE_KEY}${value.case_id}`, JSON.stringify(value)); }
   catch { /* The in-memory copy remains available when storage is blocked. */ }
+}
+
+export function rememberTimeRangeInvestigation(
+  range: TimeRangeRequest,
+  turn: TurnRecord,
+): PreparedTimeRangeInvestigation {
+  const value: Case = {
+    case_id: turn.case_id,
+    alert_ids: [],
+    hosts: [],
+    src_ips: [],
+    dst_users: [],
+    mitre_techniques: turn.mitre_techniques,
+    sigma_matched_rules: [],
+    alert_count: 0,
+    first_seen: range.start,
+    last_seen: range.end,
+    max_rule_level: 0,
+    noteworthy_alert_count: 0,
+    urgency_score: 0,
+  };
+  const prepared = { value, turn, range };
+  preparedTimeRangeInvestigations.set(turn.case_id, prepared);
+  rememberInvestigationCase(value);
+  try { sessionStorage.setItem(`${TIME_RANGE_KEY}${turn.case_id}`, JSON.stringify(prepared)); }
+  catch { /* The in-memory copy remains available when storage is blocked. */ }
+  return prepared;
+}
+
+export function getPreparedTimeRangeInvestigation(caseId: string): PreparedTimeRangeInvestigation | null {
+  const cached = preparedTimeRangeInvestigations.get(caseId);
+  if (cached) return cached;
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(`${TIME_RANGE_KEY}${caseId}`) || "null") as PreparedTimeRangeInvestigation | null;
+    if (stored?.value?.case_id === caseId && stored?.turn?.case_id === caseId && stored.range?.start && stored.range?.end) {
+      preparedTimeRangeInvestigations.set(caseId, stored);
+      selectedCases.set(caseId, stored.value);
+      return stored;
+    }
+  } catch { /* A missing prepared result falls back to the ordinary case flow. */ }
+  return null;
+}
+
+export async function rerunPreparedTimeRangeInvestigation(caseId: string): Promise<PreparedTimeRangeInvestigation> {
+  const prepared = getPreparedTimeRangeInvestigation(caseId);
+  if (!prepared) throw new Error("The original manual time range is no longer available.");
+  const turn = await investigateTimeRange(prepared.range);
+  if (turn.case_id !== caseId) throw new Error("The returned investigation belongs to a different case.");
+  return rememberTimeRangeInvestigation(prepared.range, turn);
 }
 
 export function getInvestigationHref(caseId: string, lookbackHours = getCaseLookback(caseId)): string {

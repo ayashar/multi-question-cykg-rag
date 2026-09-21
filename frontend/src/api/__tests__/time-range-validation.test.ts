@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   isIso8601DateTime,
   validateTimeRange,
-} from "@/modules/investigations/timeRangeValidation";
+} from "@/modules/investigation/services/time-range-validation";
 
 describe("manual time-range validation", () => {
   it("requires both endpoints", () => {

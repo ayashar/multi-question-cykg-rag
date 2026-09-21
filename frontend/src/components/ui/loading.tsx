@@ -103,38 +103,3 @@ export function LoadingOverlay({
     </div>
   );
 }
-
-export function InvestigationReportSkeleton() {
-  return (
-    <div
-      role="status"
-      aria-label="Loading investigation report"
-      className="w-full max-w-5xl space-y-5"
-    >
-      <div className="rounded-[3px] border border-neutral-300 p-5">
-        <Skeleton width="11rem" className="mb-3" />
-        <Skeleton width="18rem" height={34} className="mb-3" />
-        <Skeleton width="25rem" />
-      </div>
-      <div className="rounded-[3px] border border-neutral-300 p-5">
-        <Skeleton width="9rem" height={24} className="mb-4" />
-        <div className="space-y-2">
-          <Skeleton />
-          <Skeleton />
-          <Skeleton width="75%" />
-        </div>
-      </div>
-      <div className="grid gap-5 lg:grid-cols-2">
-        {[0, 1].map((item) => (
-          <div key={item} className="rounded-[3px] border border-neutral-300 p-5">
-            <Skeleton width="10rem" height={24} className="mb-4" />
-            <div className="space-y-2">
-              <Skeleton />
-              <Skeleton width="80%" />
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
