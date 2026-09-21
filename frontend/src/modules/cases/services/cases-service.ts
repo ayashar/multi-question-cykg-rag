@@ -1,6 +1,6 @@
 import { type Case, type InvestigatedCaseRecord, type LookbackPreset, LOOKBACK_HOURS_MAP } from "../types";
-import { MOCK_CASES } from "../data/casesFixture";
-import { getCases as fetchCases, getIngestionStatus, registerCasesLookback } from "@/api";
+import { MOCK_CASES } from "../data/cases-fixture";
+import { getCases as fetchCases, getIngestionStatus, registerCasesLookback, getCaseLookback } from "@/api";
 
 const INVESTIGATED_CASES_STORAGE_KEY = "kgcs_investigated_cases";
 
@@ -10,28 +10,20 @@ const INVESTIGATED_CASES_STORAGE_KEY = "kgcs_investigated_cases";
  */
 export { registerCasesLookback as persistLookbackForCases } from "@/api";
 
-/**
- * Retrieves the stored discovery window, if known.
- */
 export { getCaseLookback as getLookbackForCase } from "@/api";
 
-/**
- * Retrieves list of past investigated cases from local storage.
- */
 export function getInvestigatedCases(): InvestigatedCaseRecord[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(INVESTIGATED_CASES_STORAGE_KEY) || "[]";
-    return JSON.parse(raw);
+    const records: unknown = JSON.parse(raw);
+    return Array.isArray(records) ? records.filter((record) => record?.case_id && record?.case?.case_id === record.case_id) : [];
   } catch {
     return [];
   }
 }
 
-/**
- * Records that a case has been investigated.
- */
-export function recordInvestigatedCase(c: Case): void {
+export function recordInvestigatedCase(c: Case, lookbackHours = getCaseLookback(c.case_id)): void {
   if (typeof window === "undefined") return;
   try {
     const current = getInvestigatedCases().filter((item) => item.case_id !== c.case_id);
@@ -40,10 +32,12 @@ export function recordInvestigatedCase(c: Case): void {
         case_id: c.case_id,
         investigated_at: new Date().toISOString(),
         case: c,
+        lookback_hours: lookbackHours,
       },
       ...current,
     ];
     localStorage.setItem(INVESTIGATED_CASES_STORAGE_KEY, JSON.stringify(updated.slice(0, 20)));
+    window.dispatchEvent(new Event("kgcs-investigation-history-change"));
   } catch (err) {
     console.warn("Failed to record investigated case:", err);
   }
@@ -72,9 +66,6 @@ export async function resolveLookbackHours(preset: LookbackPreset): Promise<numb
   return hoursCoveringTimestamp(status.earliest_alert_timestamp);
 }
 
-/**
- * Fetch cases from the shared client, or use explicitly enabled mock fixtures.
- */
 export async function getCases(lookbackHours: number): Promise<Case[]> {
   const forceMock = process.env.NEXT_PUBLIC_USE_MOCK === "true";
 

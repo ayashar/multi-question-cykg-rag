@@ -1,6 +1,4 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
-
-## Getting Started
+# ChatBot KGCS frontend
 
 ### Investigation API
 
@@ -8,7 +6,7 @@ The frontend proxies `/backend/*` to `http://127.0.0.1:8000` by default, avoidin
 browser CORS issues. Set server-side `INVESTIGATION_API_URL` to change that
 destination, and `NEXT_PUBLIC_INVESTIGATION_API_KEY` when the API requires a
 key. Mock cases are used only when `NEXT_PUBLIC_USE_MOCK=true`; request failures
-otherwise remain visible.
+otherwise remain visible. The proxy allows up to 120 seconds for investigations.
 
 Import endpoint functions from `@/api`. The shared client attaches the key,
 tracks pending requests, and preserves each case's first discovery lookback
@@ -17,7 +15,28 @@ in session storage (with an in-memory fallback).
 For new screens, render `ApiErrorView` for request errors and wrap each returned
 report or transcript item in `TurnResult` so a non-null `turn.error` renders as
 a pipeline failure. Use `InvestigationLoader` for estimated investigation stages
-and `useApiLoading` for request state. Only the cases screen is currently wired.
+and `useApiLoading` for request state.
+
+### FR2 — Case investigation
+
+Select **Investigate** from `/cases` to open `/cases/[caseId]`. The selected case
+and its original discovery window are carried into the investigation. Direct
+links accept `?lookback_hours=720`; successful cases are added to local history.
+
+The loading card estimates four stages at 0, 12, 26, and 42 seconds: Reviewing
+evidence, Correlating related alerts, Building investigation findings, and
+Preparing report CTA. These are not live backend events. The last stage stays
+active for long requests, and report actions appear only after a successful
+response. Fast responses can finish before all estimated stages are shown.
+
+The result includes case details, expandable evidence lists, investigation
+findings, and an attack-graph relationship preview. **View report** opens the full
+findings, analysis, mitigations, priority, confidence, and citations;
+**Download report** exports them as Markdown. Network/auth errors support retry,
+404s can expand the discovery window, and pipeline failures suppress the report.
+
+With `NEXT_PUBLIC_USE_MOCK=true`, a clearly labeled demo report completes after
+48 seconds so all four loading stages can be previewed without backend calls.
 
 Run checks from this directory:
 
@@ -28,35 +47,10 @@ pnpm lint
 pnpm build
 ```
 
-First, run the development server:
+Run the development server:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
 pnpm dev
-# or
-bun dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.

@@ -2,12 +2,12 @@
 
 import { RotateCw } from "lucide-react";
 import { ApiErrorView } from "@/components/ui/error-states";
-import { useCases } from "@/modules/cases/hooks/useCases";
-import LookbackSelector from "@/modules/cases/components/LookbackSelector";
-import CaseTable from "@/modules/cases/components/CaseTable";
-import CaseListEmptyState from "@/modules/cases/components/CaseListEmptyState";
-import CaseListSkeleton from "@/modules/cases/components/CaseListSkeleton";
-import InvestigatedCasesSection from "@/modules/cases/components/InvestigatedCasesSection";
+import { useCases } from "@/modules/cases/hooks/use-cases";
+import LookbackSelector from "@/modules/cases/components/lookback-selector";
+import CaseTable from "@/modules/cases/components/case-table";
+import CaseListEmptyState from "@/modules/cases/components/case-list-empty-state";
+import CaseListSkeleton from "@/modules/cases/components/case-list-skeleton";
+import InvestigatedCasesSection from "@/modules/cases/components/investigated-cases-section";
 import { Button } from "@/components/ui/button";
 
 export default function CasesPage() {
@@ -29,9 +29,7 @@ export default function CasesPage() {
 
   return (
     <div className="w-full space-y-10 pb-16">
-      {/* Section 1: Active Cases to Investigate */}
       <section className="space-y-3">
-        {/* Title and Preset Buttons */}
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
           <div>
             <h1 className="font-h4 text-neutral-1000 font-bold tracking-tight text-3xl sm:text-4xl">
@@ -41,8 +39,6 @@ export default function CasesPage() {
               Cases are ranked by urgency score from the investigation API.
             </p>
           </div>
-
-          {/* Lookback Preset Selector */}
           <div className="shrink-0 sm:pt-1">
             <LookbackSelector
               activePreset={preset}
@@ -51,8 +47,6 @@ export default function CasesPage() {
             />
           </div>
         </div>
-
-        {/* Counter and Refresh Bar */}
         <div className="flex items-center justify-between text-sm font-medium text-neutral-900 pt-1">
           <span>{isLoading ? "Loading..." : `${totalCount} cases`}</span>
 
@@ -69,8 +63,6 @@ export default function CasesPage() {
             <span>Refresh</span>
           </Button>
         </div>
-
-        {/* Main Table / Loading / Empty States */}
         {isLoading && <CaseListSkeleton rowCount={5} />}
 
         {!isLoading && error && (
@@ -94,8 +86,6 @@ export default function CasesPage() {
           />
         )}
       </section>
-
-      {/* Section 2: Past Investigated Cases */}
       {!isLoading && (
         <InvestigatedCasesSection />
       )}

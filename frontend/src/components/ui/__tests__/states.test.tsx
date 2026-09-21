@@ -5,11 +5,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ApiErrorView, CaseNotFoundError, TurnResult } from "../error-states";
 import { InvestigationLoader } from "../investigation-loader";
 import { ApiClientError, type TurnRecord } from "@/api";
-import CaseTable from "@/modules/cases/components/CaseTable";
-import CaseListEmptyState from "@/modules/cases/components/CaseListEmptyState";
-import LookbackSelector from "@/modules/cases/components/LookbackSelector";
+import CaseTable from "@/modules/cases/components/case-table";
+import CaseListEmptyState from "@/modules/cases/components/case-list-empty-state";
+import LookbackSelector from "@/modules/cases/components/lookback-selector";
 import type { Case } from "@/modules/cases/types";
-import { getUrgencyStripeColor } from "@/modules/cases/components/UrgencyIndicator";
+import { getUrgencyStripeColor } from "@/modules/cases/components/urgency-indicator";
 
 test("auth dispatcher supplies one retry callback", () => {
   const retry = () => {};
@@ -68,7 +68,9 @@ test("case table preserves order and renders every required FR1 field", () => {
   assert.match(html, /2022/);
   assert.match(html, /UTC/);
   assert.match(html, /case-high[\s\S]*?Not available/);
-  assert.match(html, /Available when case investigation is implemented/);
+  assert.match(html, /href="\/cases\/case-low"/);
+  assert.match(html, /aria-label="Investigate case-low"/);
+  assert.doesNotMatch(html, /Available when case investigation is implemented/);
 });
 
 test("lookback selector and empty result are explicit and accessible", () => {

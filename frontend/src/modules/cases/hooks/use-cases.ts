@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 import { type Case, type LookbackPreset } from "../types";
-import { getCases, resolveLookbackHours } from "../services/casesService";
+import { getCases, resolveLookbackHours } from "../services/cases-service";
 
 const PRESET_KEY = "kgcs_active_lookback_preset";
 const HOURS_KEY = "kgcs_active_lookback_hours";
