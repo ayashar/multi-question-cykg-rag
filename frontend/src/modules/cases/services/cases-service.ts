@@ -23,7 +23,11 @@ export function getInvestigatedCases(): InvestigatedCaseRecord[] {
   }
 }
 
-export function recordInvestigatedCase(c: Case, lookbackHours = getCaseLookback(c.case_id)): void {
+export function recordInvestigatedCase(
+  c: Case,
+  lookbackHours = getCaseLookback(c.case_id),
+  source: InvestigatedCaseRecord["source"] = "case-list",
+): void {
   if (typeof window === "undefined") return;
   try {
     const current = getInvestigatedCases().filter((item) => item.case_id !== c.case_id);
@@ -33,6 +37,7 @@ export function recordInvestigatedCase(c: Case, lookbackHours = getCaseLookback(
         investigated_at: new Date().toISOString(),
         case: c,
         lookback_hours: lookbackHours,
+        source,
       },
       ...current,
     ];
@@ -41,6 +46,12 @@ export function recordInvestigatedCase(c: Case, lookbackHours = getCaseLookback(
   } catch (err) {
     console.warn("Failed to record investigated case:", err);
   }
+}
+
+export function isManualInvestigatedCase(caseId: string): boolean {
+  return getInvestigatedCases().some(
+    (record) => record.case_id === caseId && record.source === "manual-time-range",
+  );
 }
 
 export function hoursCoveringTimestamp(timestamp: string, now = Date.now()): number {

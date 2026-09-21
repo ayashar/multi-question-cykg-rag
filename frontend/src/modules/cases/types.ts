@@ -29,4 +29,5 @@ export interface InvestigatedCaseRecord {
   investigated_at: string;
   case: Case;
   lookback_hours?: number;
+  source?: "case-list" | "manual-time-range";
 }

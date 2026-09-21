@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { clearLookbackStore, registerCaseLookback, resetApiConfig, type Case, type TurnRecord } from "@/api";
 import {
   buildInvestigationReport,
+  clearTimeRangeInvestigationMemoryCache,
   getInvestigationHref,
   getPreparedTimeRangeInvestigation,
   loadInvestigationCase,
@@ -10,9 +11,15 @@ import {
   rememberTimeRangeInvestigation,
   runCaseInvestigation,
 } from "@/modules/investigation/services/investigation-service";
+import { isManualInvestigatedCase, recordInvestigatedCase } from "@/modules/cases/services/cases-service";
 
 const originalFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = originalFetch; clearLookbackStore(); resetApiConfig(); });
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  clearLookbackStore();
+  clearTimeRangeInvestigationMemoryCache();
+  resetApiConfig();
+});
 const value: Case = {
   case_id: "fr2-test", alert_ids: ["alert-1"], hosts: ["server-1"], src_ips: ["10.0.0.1"], dst_users: ["admin"],
   mitre_techniques: ["T1078"], sigma_matched_rules: [], alert_count: 1,
@@ -90,4 +97,42 @@ test("FR3 prepares manual results for the canonical FR2 case route and report", 
   assert.equal(prepared.value.last_seen, range.end);
   assert.deepEqual(prepared.value.mitre_techniques, ["T1110"]);
   assert.deepEqual(getPreparedTimeRangeInvestigation(manualTurn.case_id), prepared);
+});
+
+test("FR3 restores manual results after the in-memory session is lost", () => {
+  const localItems = new Map<string, string>();
+  const sessionItems = new Map<string, string>();
+  const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const sessionStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  const storage = (items: Map<string, string>) => ({
+    getItem: (key: string) => items.get(key) ?? null,
+    setItem: (key: string, storedValue: string) => items.set(key, storedValue),
+    removeItem: (key: string) => items.delete(key),
+  });
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { dispatchEvent: () => true },
+  });
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage(localItems) });
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: storage(sessionItems) });
+
+  try {
+    const range = { start: "2022-01-21T02:00:00Z", end: "2022-01-21T04:00:00Z" };
+    const manualTurn = { ...turn, case_id: "manual-persisted", mitre_techniques: ["T1110"] };
+    const prepared = rememberTimeRangeInvestigation(range, manualTurn);
+    recordInvestigatedCase(prepared.value, undefined, "manual-time-range");
+    clearTimeRangeInvestigationMemoryCache();
+
+    assert.deepEqual(getPreparedTimeRangeInvestigation(manualTurn.case_id), prepared);
+    assert.equal(isManualInvestigatedCase(manualTurn.case_id), true);
+    assert.match(localItems.get("kgcs_time_range_investigations") ?? "", /manual-persisted/);
+  } finally {
+    if (windowDescriptor) Object.defineProperty(globalThis, "window", windowDescriptor);
+    else Reflect.deleteProperty(globalThis, "window");
+    if (localStorageDescriptor) Object.defineProperty(globalThis, "localStorage", localStorageDescriptor);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+    if (sessionStorageDescriptor) Object.defineProperty(globalThis, "sessionStorage", sessionStorageDescriptor);
+    else Reflect.deleteProperty(globalThis, "sessionStorage");
+  }
 });

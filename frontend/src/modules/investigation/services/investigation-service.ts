@@ -8,6 +8,8 @@ const selectedCases = new Map<string, Case>();
 const pendingInvestigations = new Map<string, Promise<TurnRecord>>();
 const CASE_KEY = "kgcs_selected_case:";
 const TIME_RANGE_KEY = "kgcs_time_range_investigation:";
+const TIME_RANGE_STORE_KEY = "kgcs_time_range_investigations";
+const MAX_PERSISTED_TIME_RANGE_INVESTIGATIONS = 20;
 
 export interface PreparedTimeRangeInvestigation {
   value: Case;
@@ -16,6 +18,45 @@ export interface PreparedTimeRangeInvestigation {
 }
 
 const preparedTimeRangeInvestigations = new Map<string, PreparedTimeRangeInvestigation>();
+
+function isPreparedTimeRangeInvestigation(value: unknown): value is PreparedTimeRangeInvestigation {
+  if (!value || typeof value !== "object") return false;
+  const prepared = value as Partial<PreparedTimeRangeInvestigation>;
+  return Boolean(
+    prepared.value?.case_id &&
+    prepared.turn?.case_id === prepared.value.case_id &&
+    prepared.range?.start &&
+    prepared.range?.end &&
+    !Number.isNaN(Date.parse(prepared.range.start)) &&
+    !Number.isNaN(Date.parse(prepared.range.end)) &&
+    Date.parse(prepared.range.start) < Date.parse(prepared.range.end),
+  );
+}
+
+function readPersistedTimeRangeInvestigations(): PreparedTimeRangeInvestigation[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(TIME_RANGE_STORE_KEY) || "[]");
+    return Array.isArray(stored) ? stored.filter(isPreparedTimeRangeInvestigation) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistTimeRangeInvestigation(prepared: PreparedTimeRangeInvestigation): void {
+  if (typeof window === "undefined") return;
+  try {
+    const current = readPersistedTimeRangeInvestigations().filter(
+      (item) => item.value.case_id !== prepared.value.case_id,
+    );
+    localStorage.setItem(
+      TIME_RANGE_STORE_KEY,
+      JSON.stringify([prepared, ...current].slice(0, MAX_PERSISTED_TIME_RANGE_INVESTIGATIONS)),
+    );
+  } catch {
+    // The in-memory copy remains available when storage is blocked.
+  }
+}
 
 export function rememberInvestigationCase(value: Case): void {
   selectedCases.set(value.case_id, value);
@@ -45,23 +86,39 @@ export function rememberTimeRangeInvestigation(
   const prepared = { value, turn, range };
   preparedTimeRangeInvestigations.set(turn.case_id, prepared);
   rememberInvestigationCase(value);
-  try { sessionStorage.setItem(`${TIME_RANGE_KEY}${turn.case_id}`, JSON.stringify(prepared)); }
-  catch { /* The in-memory copy remains available when storage is blocked. */ }
+  persistTimeRangeInvestigation(prepared);
   return prepared;
 }
 
 export function getPreparedTimeRangeInvestigation(caseId: string): PreparedTimeRangeInvestigation | null {
   const cached = preparedTimeRangeInvestigations.get(caseId);
   if (cached) return cached;
+  const persisted = readPersistedTimeRangeInvestigations().find(
+    (item) => item.value.case_id === caseId,
+  );
+  if (persisted) {
+    preparedTimeRangeInvestigations.set(caseId, persisted);
+    selectedCases.set(caseId, persisted.value);
+    return persisted;
+  }
+
+  // Migrate manual investigations created before durable local storage was added.
   try {
     const stored = JSON.parse(sessionStorage.getItem(`${TIME_RANGE_KEY}${caseId}`) || "null") as PreparedTimeRangeInvestigation | null;
-    if (stored?.value?.case_id === caseId && stored?.turn?.case_id === caseId && stored.range?.start && stored.range?.end) {
+    if (isPreparedTimeRangeInvestigation(stored) && stored.value.case_id === caseId) {
       preparedTimeRangeInvestigations.set(caseId, stored);
       selectedCases.set(caseId, stored.value);
+      persistTimeRangeInvestigation(stored);
+      sessionStorage.removeItem(`${TIME_RANGE_KEY}${caseId}`);
       return stored;
     }
   } catch { /* A missing prepared result falls back to the ordinary case flow. */ }
   return null;
+}
+
+export function clearTimeRangeInvestigationMemoryCache(): void {
+  preparedTimeRangeInvestigations.clear();
+  selectedCases.clear();
 }
 
 export async function rerunPreparedTimeRangeInvestigation(caseId: string): Promise<PreparedTimeRangeInvestigation> {
@@ -110,7 +167,7 @@ export async function loadInvestigationCase(caseId: string, lookbackHours?: numb
 export function runCaseInvestigation(value: Case, lookbackHours?: number): Promise<TurnRecord> {
   const hours = resolveCaseLookback(value.case_id, lookbackHours) ?? 336;
   const config = getApiConfig();
-  const key = JSON.stringify([config.baseUrl, config.apiKey, value.case_id, hours]);
+  const key = JSON.stringify([config.baseUrl, value.case_id, hours]);
   const pending = pendingInvestigations.get(key);
   if (pending) return pending;
 

@@ -33,4 +33,26 @@ describe("manual time-range validation", () => {
     assert.equal(isIso8601DateTime("2026-09-17T10:00:00+07:00"), true);
     assert.equal(isIso8601DateTime("17/09/2026 10:00"), false);
   });
+
+  it("rejects future endpoints", () => {
+    const now = Date.parse("2026-09-21T12:00:00Z");
+    const futureStart = validateTimeRange(
+      "2026-09-22T10:00",
+      "2026-09-22T11:00",
+      { now },
+    );
+    assert.match(futureStart.errors.start ?? "", /future/);
+    assert.match(futureStart.errors.end ?? "", /future/);
+    assert.equal(futureStart.payload, null);
+  });
+
+  it("rejects ranges longer than the configured maximum", () => {
+    const result = validateTimeRange(
+      "2026-08-01T00:00",
+      "2026-09-15T00:00",
+      { now: Date.parse("2026-09-21T12:00:00Z"), maxRangeDays: 31 },
+    );
+    assert.equal(result.payload, null);
+    assert.match(result.errors.range ?? "", /31 days or less/);
+  });
 });

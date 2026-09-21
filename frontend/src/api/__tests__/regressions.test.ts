@@ -8,7 +8,7 @@ import {
 import {
   getCases, investigateCase, getAttackGraph, investigateTimeRange, sendChatMessage,
   getChatTranscript, getIngestionConfig, updateIngestionConfig, getIngestionStatus,
-  getCaseLookback, clearLookbackStore, getApiLoadingState, setApiConfig, resetApiConfig,
+  getCaseLookback, clearLookbackStore, getApiLoadingState, resetApiConfig,
   ApiClientError, type Case,
 } from "../index";
 
@@ -68,8 +68,7 @@ test("restores the first discovery window from session storage", async () => {
   }
 });
 
-test("all nine endpoints inject the configured key and track loading", async () => {
-  setApiConfig({ apiKey: "regression-key" });
+test("all nine endpoints keep credentials out of the browser and track loading", async () => {
   const config = { alerts_path: null, speed: 100000, max_gap_seconds: 0.2 };
   const calls = [
     () => getCases(), () => investigateCase("c"), () => getAttackGraph("c"),
@@ -79,7 +78,7 @@ test("all nine endpoints inject the configured key and track loading", async () 
   ];
   let count = 0;
   globalThis.fetch = async (_url, init) => {
-    assert.equal(new Headers(init?.headers).get("X-API-Key"), "regression-key");
+    assert.equal(new Headers(init?.headers).get("X-API-Key"), null);
     assert.equal(getApiLoadingState().activeCalls, 1);
     count++;
     return Response.json([]);
@@ -122,9 +121,8 @@ test("preserves real JSON and plain-text error bodies", async () => {
 test("cases screen service uses runtime config and surfaces errors rather than mock fallback", async () => {
   const previousMock = process.env.NEXT_PUBLIC_USE_MOCK;
   process.env.NEXT_PUBLIC_USE_MOCK = "false";
-  setApiConfig({ apiKey: "screen-key" });
   globalThis.fetch = async (_url, init) => {
-    assert.equal(new Headers(init?.headers).get("X-API-Key"), "screen-key");
+    assert.equal(new Headers(init?.headers).get("X-API-Key"), null);
     assert.equal(getApiLoadingState().isLoading, true);
     return Response.json({ detail: "Missing or invalid X-API-Key." }, { status: 401 });
   };

@@ -2,7 +2,7 @@ import React from "react";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ApiErrorView, CaseNotFoundError, TurnResult } from "../error-states";
+import { ApiErrorView, ApiKeyAuthError, CaseNotFoundError, TurnResult } from "../error-states";
 import { InvestigationLoader } from "../investigation-loader";
 import { ApiClientError, type TurnRecord } from "@/api";
 import CaseTable from "@/modules/cases/components/case-table";
@@ -10,12 +10,21 @@ import CaseListEmptyState from "@/modules/cases/components/case-list-empty-state
 import LookbackSelector from "@/modules/cases/components/lookback-selector";
 import type { Case } from "@/modules/cases/types";
 import { getUrgencyStripeColor } from "@/modules/cases/components/urgency-indicator";
+import AttackGraphPreview from "@/modules/investigation/components/attack-graph-preview";
 
 test("auth dispatcher supplies one retry callback", () => {
   const retry = () => {};
   const element = ApiErrorView({ error: new ApiClientError(401, "Unauthorized", "Invalid key", "/cases"), onRetry: retry });
   assert.equal(element.props.onRetry, retry);
   assert.equal(element.props.onSuccess, undefined);
+});
+
+test("authentication errors keep API keys out of browser inputs", () => {
+  const html = renderToStaticMarkup(<ApiKeyAuthError onRetry={() => {}} />);
+  assert.match(html, /INVESTIGATION_API_KEY/);
+  assert.match(html, /Next\.js server/);
+  assert.doesNotMatch(html, /type="password"/);
+  assert.doesNotMatch(html, /Save Key/);
 });
 
 test("404 preserves backend detail and expands rather than narrowing a wide window", () => {
@@ -45,6 +54,15 @@ test("investigation progress is explicitly estimated and accessible", () => {
   const html = renderToStaticMarkup(<InvestigationLoader />);
   assert.match(html, /role="status"/);
   assert.match(html, /not live backend progress/);
+});
+
+test("manual investigations explain why attack graphs are unavailable", () => {
+  const html = renderToStaticMarkup(
+    <AttackGraphPreview caseId="manual-case" manualTimeRange />,
+  );
+  assert.match(html, /unavailable for manual time-range investigations/);
+  assert.match(html, /lookback-derived cases/);
+  assert.doesNotMatch(html, /Loading attack graph/);
 });
 
 const caseRow: Case = {

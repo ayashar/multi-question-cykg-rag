@@ -8,7 +8,7 @@ import { ApiClientError, resolveCaseLookback, type Case, type TurnRecord } from 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { ApiErrorView, CaseNotFoundError, TurnResult } from "@/components/ui/error-states";
 import { InvestigationLoader } from "@/components/ui/investigation-loader";
-import { recordInvestigatedCase } from "@/modules/cases/services/cases-service";
+import { isManualInvestigatedCase, recordInvestigatedCase } from "@/modules/cases/services/cases-service";
 import { cn } from "@/lib/utils";
 import {
   getInvestigationHref,
@@ -45,6 +45,9 @@ export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: s
     async function investigate() {
       try {
         const prepared = getPreparedTimeRangeInvestigation(caseId);
+        if (!prepared && isManualInvestigatedCase(caseId)) {
+          throw new Error("The saved manual investigation is incomplete. Start it again from Time Span Case.");
+        }
         const selected = prepared?.value ?? await loadInvestigationCase(caseId, lookbackHours);
         if (cancelled) return;
         setValue(selected);
@@ -63,6 +66,7 @@ export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: s
           recordInvestigatedCase(
             selected,
             prepared ? undefined : resolveCaseLookback(caseId, lookbackHours) ?? 336,
+            prepared ? "manual-time-range" : "case-list",
           );
         }
       } catch (reason) {
@@ -103,10 +107,27 @@ export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: s
           {process.env.NEXT_PUBLIC_USE_MOCK === "true" && <p className="font-b3 text-primary-700">Demo mode · sample data</p>}
         </div>
         {ready && <nav aria-label="Investigation views" className="flex flex-wrap gap-2 sm:gap-3">
-          {views.map(({ id, label, icon: Icon }) => <Button key={id} type="button" aria-pressed={view === id} onClick={() => showView(id)}
-            className={cn("font-b2", view === id ? "bg-primary-600 text-white hover:bg-primary-700" : "bg-neutral-200 text-neutral-1000 hover:bg-neutral-300")}>
-            <Icon aria-hidden="true" className="size-4" />{label}
-          </Button>)}
+          {views.map(({ id, label, icon: Icon }) => {
+            const graphUnavailable = isManualTimeRange && id === "graph";
+            return (
+              <Button
+                key={id}
+                type="button"
+                aria-pressed={view === id}
+                onClick={() => showView(id)}
+                disabled={graphUnavailable}
+                title={graphUnavailable ? "Attack graph is unavailable for manual time-range investigations." : undefined}
+                className={cn(
+                  "font-b2 disabled:cursor-not-allowed disabled:opacity-55",
+                  view === id
+                    ? "bg-primary-600 text-white hover:bg-primary-700"
+                    : "bg-neutral-200 text-neutral-1000 hover:bg-neutral-300",
+                )}
+              >
+                <Icon aria-hidden="true" className="size-4" />{label}
+              </Button>
+            );
+          })}
         </nav>}
       </div>
 
@@ -157,14 +178,14 @@ export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: s
             </section>
             <section className="space-y-4 rounded-[10px] bg-primary-100 p-5">
               <div className="flex items-center justify-between gap-3"><h2 className="font-h6">Attack Graph</h2>
-                <Button type="button" onClick={() => showView("graph")} className="bg-primary-600 text-white hover:bg-primary-700">See more<ArrowUpRight aria-hidden="true" className="size-4" /></Button>
+                <Button type="button" disabled={isManualTimeRange} onClick={() => showView("graph")} className="bg-primary-600 text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-55">See more<ArrowUpRight aria-hidden="true" className="size-4" /></Button>
               </div>
-              <div className="rounded-[4px] bg-background p-3"><AttackGraphPreview caseId={caseId} lookbackHours={lookbackHours} /></div>
+              <div className="rounded-[4px] bg-background p-3"><AttackGraphPreview caseId={caseId} lookbackHours={lookbackHours} manualTimeRange={isManualTimeRange} /></div>
             </section>
           </div>}
           {view === "graph" && <section className="space-y-4 rounded-[10px] bg-primary-100 p-5">
             <h2 className="font-h6">Attack Graph</h2><p className="font-b2">Evidence relationships reconstructed for this case.</p>
-            <div className="rounded-[4px] bg-background p-4"><AttackGraphPreview caseId={caseId} lookbackHours={lookbackHours} expanded /></div>
+            <div className="rounded-[4px] bg-background p-4"><AttackGraphPreview caseId={caseId} lookbackHours={lookbackHours} manualTimeRange={isManualTimeRange} expanded /></div>
           </section>}
         </TurnResult>}
       </div>

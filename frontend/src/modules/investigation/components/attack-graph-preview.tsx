@@ -14,8 +14,11 @@ const nodeColors: Record<string, string> = {
   mitre_technique: "border-green-200 bg-green-100/40 text-green-500",
 };
 
-export default function AttackGraphPreview({ caseId, lookbackHours, expanded = false }: {
-  caseId: string; lookbackHours?: number; expanded?: boolean;
+export const MANUAL_ATTACK_GRAPH_UNAVAILABLE =
+  "Attack graph is unavailable for manual time-range investigations because the API only reconstructs graphs for lookback-derived cases.";
+
+export default function AttackGraphPreview({ caseId, lookbackHours, expanded = false, manualTimeRange = false }: {
+  caseId: string; lookbackHours?: number; expanded?: boolean; manualTimeRange?: boolean;
 }) {
   const [graph, setGraph] = useState<CaseAttackGraph | null>(null);
   const [error, setError] = useState<Error | null>(null);
@@ -23,7 +26,7 @@ export default function AttackGraphPreview({ caseId, lookbackHours, expanded = f
   const demo = process.env.NEXT_PUBLIC_USE_MOCK === "true";
 
   useEffect(() => {
-    if (demo) return;
+    if (demo || manualTimeRange) return;
     let cancelled = false;
     getAttackGraph(caseId, lookbackHours).then((value) => {
       if (value.case_id !== caseId) throw new Error("The returned attack graph belongs to a different case.");
@@ -32,8 +35,9 @@ export default function AttackGraphPreview({ caseId, lookbackHours, expanded = f
       if (!cancelled) setError(reason instanceof Error ? reason : new Error("Could not load the attack graph."));
     });
     return () => { cancelled = true; };
-  }, [caseId, lookbackHours, attempt, demo]);
+  }, [caseId, lookbackHours, attempt, demo, manualTimeRange]);
 
+  if (manualTimeRange) return <p className="font-b2 text-neutral-800">{MANUAL_ATTACK_GRAPH_UNAVAILABLE}</p>;
   if (demo) return <p className="font-b2 text-neutral-800">A live investigation is needed to reconstruct the attack graph. Demo mode only includes case metadata.</p>;
   if (error) return <ApiErrorView error={error} onRetry={() => { setError(null); setAttempt(attempt + 1); }} />;
   if (!graph) return <p role="status" className="flex items-center gap-2 py-8 font-b2"><LoaderCircle aria-hidden="true" className="size-4 motion-safe:animate-spin" />Loading attack graph…</p>;

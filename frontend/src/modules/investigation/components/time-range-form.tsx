@@ -11,7 +11,7 @@ import {
   getInvestigationHref,
   rememberTimeRangeInvestigation,
 } from "../services/investigation-service";
-import { validateTimeRange } from "../services/time-range-validation";
+import { getMaxTimeRangeDays, validateTimeRange } from "../services/time-range-validation";
 
 type ValidationErrors = ReturnType<typeof validateTimeRange>["errors"];
 
@@ -35,6 +35,7 @@ export default function TimeRangeForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [startedAt, setStartedAt] = useState<number>();
   const timeZoneLabel = useMemo(() => getTimeZoneLabel(), []);
+  const maxRangeDays = getMaxTimeRangeDays();
 
   async function submitRange() {
     const validation = validateTimeRange(start, end);
@@ -121,7 +122,7 @@ export default function TimeRangeForm() {
         <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p id="range-timezone" className="font-b3 text-primary-1000/75">
-              Times use your browser zone ({timeZoneLabel}) and are submitted as UTC ISO-8601.
+              Times use your browser zone ({timeZoneLabel}), are submitted as UTC ISO-8601, and may span up to {maxRangeDays} days.
             </p>
             {errors.range && (
               <p role="alert" className="mt-1.5 flex items-center gap-1 font-b3 font-semibold text-red-400">

@@ -11,10 +11,9 @@ import {
   ChevronUp,
   ArrowLeft,
   Calendar,
-  ShieldAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getApiConfig, setApiConfig, getCaseLookback, ApiClientError, type TurnRecord } from "@/api";
+import { getApiConfig, getCaseLookback, ApiClientError, type TurnRecord } from "@/api";
 
 export interface BackendUnreachableErrorProps
   extends React.HTMLAttributes<HTMLDivElement> {
@@ -262,18 +261,7 @@ export function ApiKeyAuthError({
   className,
   ...props
 }: ApiKeyAuthErrorProps) {
-  const [apiKeyInput, setApiKeyInput] = React.useState(
-    getApiConfig().apiKey || ""
-  );
-  const [saved, setSaved] = React.useState(false);
-
-  const handleSaveAndRetry = (e: React.FormEvent) => {
-    e.preventDefault();
-    setApiConfig({ apiKey: apiKeyInput.trim() });
-    setSaved(true);
-    (onRetry ?? onSuccess)?.();
-  };
-
+  const retry = onRetry ?? onSuccess;
   return (
     <div role="alert"
       className={cn(
@@ -286,41 +274,23 @@ export function ApiKeyAuthError({
         <KeyRound className="w-6 h-6" />
       </div>
       <h3 className="font-h6 text-neutral-1000 text-center mb-1 font-bold">
-        API Key Authentication Required
+        API Authentication Misconfigured
       </h3>
       <p className="font-b3 text-neutral-700 text-center mb-5 leading-normal">
-        The backend requires an <code className="bg-neutral-100 border border-neutral-200 px-1 py-0.5 rounded-[3px] font-mono font-semibold text-black-600">X-API-Key</code> matching INVESTIGATION_API_KEY.
+        The frontend server could not authenticate with the investigation API. Configure
+        <code className="mx-1 bg-neutral-100 border border-neutral-200 px-1 py-0.5 rounded-[3px] font-mono font-semibold text-black-600">INVESTIGATION_API_KEY</code>
+        on the Next.js server, then retry.
       </p>
-
-      <form onSubmit={handleSaveAndRetry} className="space-y-4">
-        <div>
-          <label htmlFor="api-key" className="block font-b3 font-semibold text-neutral-900 mb-1.5">
-            X-API-Key
-          </label>
-          <input
-            id="api-key"
-            type="password"
-            value={apiKeyInput}
-            onChange={(e) => setApiKeyInput(e.target.value)}
-            placeholder="Enter API Key"
-            className="w-full px-3 py-2 rounded-[3px] border border-neutral-300 font-mono font-b3 bg-neutral-100 text-black-600 focus:outline-hidden focus:border-primary-600 focus:bg-background transition-colors"
-          />
-        </div>
-
-        {saved && (
-          <p className="font-b3 text-green-500 font-semibold text-center">
-            Key saved to client configuration!
-          </p>
-        )}
-
+      {retry && (
         <button
-          type="submit"
+          type="button"
+          onClick={retry}
           className="w-full inline-flex items-center justify-center gap-2 rounded-[3px] bg-primary-800 hover:bg-primary-700 text-neutral-100 font-b3 py-2 px-3.5 transition-colors cursor-pointer"
         >
-          <ShieldAlert className="w-4 h-4" />
-          Save Key & Retry
+          <RefreshCw className="w-4 h-4" />
+          Retry Request
         </button>
-      </form>
+      )}
     </div>
   );
 }

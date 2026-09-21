@@ -51,7 +51,6 @@ describe("API Client Suite", () => {
     resetApiConfig();
     setApiConfig({
       baseUrl: "http://test-api:8000",
-      apiKey: "test-secret-key-123",
     });
 
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -81,17 +80,17 @@ describe("API Client Suite", () => {
     resetApiConfig();
   });
 
-  describe("X-API-Key and Headers Wiring", () => {
-    it("injects X-API-Key header into GET requests", async () => {
+  describe("Browser request headers", () => {
+    it("never exposes an X-API-Key in GET requests", async () => {
       setupMockFetch([]);
       await getCases();
 
       assert.ok(lastCall);
       const headers = lastCall.options?.headers as Headers;
-      assert.equal(headers.get("X-API-Key"), "test-secret-key-123");
+      assert.equal(headers.get("X-API-Key"), null);
     });
 
-    it("injects X-API-Key and Content-Type: application/json into POST requests", async () => {
+    it("sends JSON POST requests without exposing an X-API-Key", async () => {
       setupMockFetch({
         case_id: "c-1",
         turn_index: 1,
@@ -107,20 +106,19 @@ describe("API Client Suite", () => {
 
       assert.ok(lastCall);
       const headers = lastCall.options?.headers as Headers;
-      assert.equal(headers.get("X-API-Key"), "test-secret-key-123");
+      assert.equal(headers.get("X-API-Key"), null);
       assert.equal(headers.get("Content-Type"), "application/json");
       assert.equal(lastCall.options?.method, "POST");
     });
 
-    it("allows updating the API key at runtime via setApiConfig", async () => {
-      setApiConfig({ apiKey: "rotated-key-456" });
+    it("allows overriding the API base URL for isolated clients and tests", async () => {
+      setApiConfig({ baseUrl: "http://rotated-api:9000" });
       setupMockFetch([]);
 
       await getCases();
 
       assert.ok(lastCall);
-      const headers = lastCall.options?.headers as Headers;
-      assert.equal(headers.get("X-API-Key"), "rotated-key-456");
+      assert.equal(new URL(lastCall.url).origin, "http://rotated-api:9000");
     });
   });
 

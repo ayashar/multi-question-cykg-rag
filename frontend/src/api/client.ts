@@ -110,7 +110,6 @@ export interface SendChatMessageParams {
 
 export interface ApiConfig {
   baseUrl: string;
-  apiKey?: string;
 }
 
 export type ApiEndpointKey =
@@ -240,19 +239,10 @@ export class ApiClientError extends Error {
   }
 }
 
-const DEFAULT_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ||
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  "/backend";
-
-const DEFAULT_API_KEY =
-  process.env.NEXT_PUBLIC_INVESTIGATION_API_KEY ||
-  process.env.NEXT_PUBLIC_API_KEY ||
-  "";
+const DEFAULT_BASE_URL = "/backend";
 
 let currentConfig: ApiConfig = {
   baseUrl: DEFAULT_BASE_URL.replace(/\/+$/, ""),
-  apiKey: DEFAULT_API_KEY,
 };
 
 export function getApiConfig(): ApiConfig {
@@ -265,21 +255,12 @@ export function setApiConfig(config: Partial<ApiConfig>): void {
       config.baseUrl !== undefined
         ? config.baseUrl.replace(/\/+$/, "")
         : currentConfig.baseUrl,
-    apiKey: config.apiKey !== undefined ? config.apiKey : currentConfig.apiKey,
   };
 }
 
 export function resetApiConfig(): void {
   currentConfig = {
-    baseUrl: (
-      process.env.NEXT_PUBLIC_API_URL ||
-      process.env.NEXT_PUBLIC_API_BASE_URL ||
-      DEFAULT_BASE_URL
-    ).replace(/\/+$/, ""),
-    apiKey:
-      process.env.NEXT_PUBLIC_INVESTIGATION_API_KEY ||
-      process.env.NEXT_PUBLIC_API_KEY ||
-      DEFAULT_API_KEY,
+    baseUrl: DEFAULT_BASE_URL,
   };
 }
 
@@ -359,7 +340,7 @@ export async function apiRequest<T>(
   });
 
   try {
-    const { baseUrl, apiKey } = getApiConfig();
+    const { baseUrl } = getApiConfig();
     const {
       params,
       body,
@@ -387,10 +368,6 @@ export async function apiRequest<T>(
     }
 
     const headers = new Headers(customHeaders);
-
-    if (apiKey !== undefined && apiKey !== null) {
-      headers.set("X-API-Key", apiKey);
-    }
 
     let serializedBody: BodyInit | undefined;
     if (body !== undefined) {
