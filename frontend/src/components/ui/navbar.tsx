@@ -16,7 +16,11 @@ const routeTitles: Record<string, string> = {
 
 export default function Navbar({ title }: NavbarProps) {
   const pathname = usePathname();
-  const displayTitle = title ?? routeTitles[pathname] ?? "Dashboard";
+  const displayTitle =
+    title ??
+    (pathname.startsWith("/investigations/")
+      ? "Investigation Report"
+      : routeTitles[pathname] ?? "Dashboard");
 
   return (
     <header className="w-full border-b border-neutral-300 px-8 py-4 min-h-18.25 flex items-center justify-between bg-background sticky top-0 z-10">
