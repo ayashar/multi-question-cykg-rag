@@ -11,6 +11,7 @@ import LookbackSelector from "@/modules/cases/components/lookback-selector";
 import type { Case } from "@/modules/cases/types";
 import { getUrgencyStripeColor } from "@/modules/cases/components/urgency-indicator";
 import AttackGraphPreview from "@/modules/investigation/components/attack-graph-preview";
+import TimeRangeErrorState from "@/modules/investigation/components/time-range-error-state";
 
 test("auth dispatcher supplies one retry callback", () => {
   const retry = () => {};
@@ -25,6 +26,30 @@ test("authentication errors keep API keys out of browser inputs", () => {
   assert.match(html, /Next\.js server/);
   assert.doesNotMatch(html, /type="password"/);
   assert.doesNotMatch(html, /Save Key/);
+});
+
+test("time-range request errors use the compact feature-specific state", () => {
+  const unavailable = renderToStaticMarkup(
+    <TimeRangeErrorState
+      error={new ApiClientError(502, "Bad Gateway", "The investigation API is unavailable.", "/backend/investigations/time-range")}
+      onRetry={() => {}}
+    />,
+  );
+  assert.match(unavailable, /Service unavailable/);
+  assert.match(unavailable, /investigation service is not responding/);
+  assert.match(unavailable, />Retry</);
+  assert.match(unavailable, /Error details/);
+  assert.doesNotMatch(unavailable, /Backend Unreachable/);
+  assert.doesNotMatch(unavailable, /Target Endpoint/);
+
+  const emptyRange = renderToStaticMarkup(
+    <TimeRangeErrorState
+      error={new ApiClientError(404, "Not Found", "No alerts found between the selected dates.", "/backend/investigations/time-range")}
+      onRetry={() => {}}
+    />,
+  );
+  assert.match(emptyRange, /No matching alerts/);
+  assert.match(emptyRange, /Adjust the start or end time/);
 });
 
 test("404 preserves backend detail and expands rather than narrowing a wide window", () => {

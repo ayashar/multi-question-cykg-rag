@@ -5,13 +5,13 @@ import { AlertCircle, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { investigateTimeRange } from "@/api";
 import { Button } from "@/components/ui/button";
-import { ApiErrorView } from "@/components/ui/error-states";
 import { InvestigationLoader } from "@/components/ui/investigation-loader";
 import {
   getInvestigationHref,
   rememberTimeRangeInvestigation,
 } from "../services/investigation-service";
 import { getMaxTimeRangeDays, validateTimeRange } from "../services/time-range-validation";
+import TimeRangeErrorState from "./time-range-error-state";
 
 type ValidationErrors = ReturnType<typeof validateTimeRange>["errors"];
 
@@ -144,10 +144,9 @@ export default function TimeRangeForm() {
       </form>
 
       {requestError !== null && (
-        <ApiErrorView
+        <TimeRangeErrorState
           error={requestError}
           onRetry={() => void submitRange()}
-          className="mx-0 max-w-3xl"
         />
       )}
     </div>
