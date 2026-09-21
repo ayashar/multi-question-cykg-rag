@@ -127,11 +127,12 @@ async def _run_turn(case_id: str, question: str, extra_state: dict) -> TurnRecor
 
 async def start_investigation(case: Case, alerts: List[Alert]) -> TurnRecord:
     """Idempotent: a case that's already been opened returns its existing
-    first turn instead of re-running the pipeline (and spending another
-    round of LLM calls) -- use ask_followup for continued Q&A on an
-    already-started case."""
-    if case.case_id in _transcripts:
-        return _transcripts[case.case_id][0]
+    successful initial turn instead of re-running the pipeline (and spending
+    another round of LLM calls). Failed initial attempts can be retried and
+    remain in the transcript/audit log. Use ask_followup for continued Q&A."""
+    for record in _transcripts.get(case.case_id, []):
+        if record.question == INITIAL_DIRECTIVE and record.error is None:
+            return record
     _case_by_id[case.case_id] = case
     case_context = build_case_context(case, alerts)
     return await _run_turn(case.case_id, INITIAL_DIRECTIVE, {

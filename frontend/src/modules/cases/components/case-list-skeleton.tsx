@@ -6,10 +6,8 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 export default function CaseListSkeleton({ rowCount = 5 }: { rowCount?: number }) {
   return (
     <div className="w-full flex flex-col space-y-2 animate-pulse">
-      {/* Table Skeleton without outer border */}
       <div className="w-full overflow-x-auto">
         <table className="w-full text-left border-separate border-spacing-y-1 min-w-[760px]">
-          {/* Header */}
           <thead>
             <tr className="bg-[#8555a3]/80 text-white text-xs font-semibold">
               <th className="py-2.5 px-4 w-44 font-normal rounded-l-[3px]">Urgency</th>
@@ -20,8 +18,6 @@ export default function CaseListSkeleton({ rowCount = 5 }: { rowCount?: number }
               <th className="py-2.5 px-4 w-32 text-right rounded-r-[3px]"></th>
             </tr>
           </thead>
-
-          {/* Body */}
           <tbody>
             {Array.from({ length: rowCount }).map((_, index) => (
               <tr key={index} className="bg-[#b394c4]/60">
@@ -58,8 +54,6 @@ export default function CaseListSkeleton({ rowCount = 5 }: { rowCount?: number }
           </tbody>
         </table>
       </div>
-
-      {/* Pagination Skeleton */}
       <div className="flex items-center justify-end gap-2 pt-1">
         <Button
           size="icon"

@@ -2,12 +2,16 @@
 
 import { useState, useSyncExternalStore } from "react";
 import { Case } from "../types";
-import { getInvestigatedCases } from "../services/casesService";
-import CaseTable from "./CaseTable";
+import { getInvestigatedCases } from "../services/cases-service";
+import CaseTable from "./case-table";
 
 const subscribe = (callback: () => void) => {
   window.addEventListener("storage", callback);
-  return () => window.removeEventListener("storage", callback);
+  window.addEventListener("kgcs-investigation-history-change", callback);
+  return () => {
+    window.removeEventListener("storage", callback);
+    window.removeEventListener("kgcs-investigation-history-change", callback);
+  };
 };
 const getSnapshot = () => {
   try { return localStorage.getItem("kgcs_investigated_cases") || "[]"; }
@@ -31,7 +35,6 @@ export default function InvestigatedCasesSection() {
 
   return (
     <section className="space-y-3 pt-6">
-      {/* Section Header matching mockup */}
       <div>
         <h2 className="font-h5 text-neutral-1000 font-bold tracking-tight text-2xl sm:text-3xl">
           See again your investigated cases.
@@ -46,6 +49,8 @@ export default function InvestigatedCasesSection() {
       </div>
 
       <CaseTable
+        actionLabel="View investigation"
+        lookbacks={Object.fromEntries(history.map((record) => [record.case_id, record.lookback_hours]))}
         cases={paginatedCases}
         currentPage={page}
         totalPages={totalPages}

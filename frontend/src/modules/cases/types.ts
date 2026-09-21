@@ -28,4 +28,5 @@ export interface InvestigatedCaseRecord {
   case_id: string;
   investigated_at: string;
   case: Case;
+  lookback_hours?: number;
 }

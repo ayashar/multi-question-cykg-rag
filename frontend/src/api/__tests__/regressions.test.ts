@@ -4,7 +4,7 @@ import {
   getCases as getScreenCases,
   hoursCoveringTimestamp,
   resolveLookbackHours,
-} from "@/modules/cases/services/casesService";
+} from "@/modules/cases/services/cases-service";
 import {
   getCases, investigateCase, getAttackGraph, investigateTimeRange, sendChatMessage,
   getChatTranscript, getIngestionConfig, updateIngestionConfig, getIngestionStatus,
