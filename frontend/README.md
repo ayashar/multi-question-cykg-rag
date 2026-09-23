@@ -37,8 +37,9 @@ findings, analysis, mitigations, priority, confidence, and citations;
 **Download report** exports them as Markdown. Network/auth errors support retry,
 404s can expand the discovery window, and pipeline failures suppress the report.
 
-With `NEXT_PUBLIC_USE_MOCK=true`, a clearly labeled demo report completes after
-48 seconds so all four loading stages can be previewed without backend calls.
+With `NEXT_PUBLIC_USE_MOCK=true`, case investigations use a clearly labeled demo
+report and manual time-range submissions return deterministic sample findings
+without backend calls.
 
 ### FR3 — Manual time-range investigation
 

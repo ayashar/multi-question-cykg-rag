@@ -3,12 +3,12 @@
 import { useMemo, useState } from "react";
 import { AlertCircle, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { investigateTimeRange } from "@/api";
 import { Button } from "@/components/ui/button";
 import { InvestigationLoader } from "@/components/ui/investigation-loader";
 import {
   getInvestigationHref,
   rememberTimeRangeInvestigation,
+  runTimeRangeInvestigation,
 } from "../services/investigation-service";
 import { getMaxTimeRangeDays, validateTimeRange } from "../services/time-range-validation";
 import TimeRangeErrorState from "./time-range-error-state";
@@ -47,7 +47,7 @@ export default function TimeRangeForm() {
     setIsSubmitting(true);
     setStartedAt(Date.now());
     try {
-      const turn = await investigateTimeRange(validation.payload);
+      const turn = await runTimeRangeInvestigation(validation.payload);
       rememberTimeRangeInvestigation(validation.payload, turn);
       router.push(getInvestigationHref(turn.case_id));
     } catch (error) {
