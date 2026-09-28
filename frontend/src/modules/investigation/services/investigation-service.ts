@@ -1,11 +1,16 @@
 import {
-  ApiClientError, getApiConfig, getCaseLookback, investigateCase, investigateTimeRange,
-  registerCaseLookback, resolveCaseLookback, type Case, type TimeRangeRequest, type TurnRecord,
+  ApiClientError, getApiConfig, getCaseLookback, investigateCaseStream, investigateTimeRange,
+  registerCaseLookback, resolveCaseLookback, type Case, type InvestigationProgressEvent, type TimeRangeRequest, type TurnRecord,
 } from "@/api";
 import { getCases, getInvestigatedCases } from "@/modules/cases/services/cases-service";
 
 const selectedCases = new Map<string, Case>();
-const pendingInvestigations = new Map<string, Promise<TurnRecord>>();
+interface PendingInvestigation {
+  promise: Promise<TurnRecord>;
+  listeners: Set<(event: InvestigationProgressEvent) => void>;
+}
+
+const pendingInvestigations = new Map<string, PendingInvestigation>();
 const CASE_KEY = "kgcs_selected_case:";
 const TIME_RANGE_KEY = "kgcs_time_range_investigation:";
 const TIME_RANGE_STORE_KEY = "kgcs_time_range_investigations";
@@ -164,16 +169,27 @@ export async function loadInvestigationCase(caseId: string, lookbackHours?: numb
 }
 
 /** Share an in-flight POST across remounts so React Strict Mode cannot run it twice. */
-export function runCaseInvestigation(value: Case, lookbackHours?: number): Promise<TurnRecord> {
+export function runCaseInvestigation(
+  value: Case,
+  lookbackHours?: number,
+  onProgress?: (event: InvestigationProgressEvent) => void,
+): Promise<TurnRecord> {
   const hours = resolveCaseLookback(value.case_id, lookbackHours) ?? 336;
   const config = getApiConfig();
   const key = JSON.stringify([config.baseUrl, value.case_id, hours]);
   const pending = pendingInvestigations.get(key);
-  if (pending) return pending;
+  if (pending) {
+    if (onProgress) pending.listeners.add(onProgress);
+    return pending.promise;
+  }
 
-  const request = investigateCase(value.case_id, hours)
+  const listeners = new Set<(event: InvestigationProgressEvent) => void>();
+  if (onProgress) listeners.add(onProgress);
+  const request = investigateCaseStream(value.case_id, (event) => {
+    for (const listener of listeners) listener(event);
+  }, hours, value)
     .finally(() => pendingInvestigations.delete(key));
-  pendingInvestigations.set(key, request);
+  pendingInvestigations.set(key, { promise: request, listeners });
   return request;
 }
 

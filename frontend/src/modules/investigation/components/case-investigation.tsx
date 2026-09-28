@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowUpRight, CheckCircle2, FileText, GitMerge, LayoutGrid, LoaderCircle } from "lucide-react";
-import { ApiClientError, resolveCaseLookback, type Case, type TurnRecord } from "@/api";
+import { ArrowLeft, ArrowUpRight, FileText, GitMerge, LayoutGrid, LoaderCircle } from "lucide-react";
+import { ApiClientError, resolveCaseLookback, type Case, type InvestigationProgressEvent, type TurnRecord } from "@/api";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { ApiErrorView, CaseNotFoundError, TurnResult } from "@/components/ui/error-states";
-import { InvestigationLoader } from "@/components/ui/investigation-loader";
+import { InvestigationLoader, InvestigationLog } from "@/components/ui/investigation-loader";
 import { isManualInvestigatedCase, recordInvestigatedCase } from "@/modules/cases/services/cases-service";
 import { cn } from "@/lib/utils";
 import {
@@ -18,7 +18,7 @@ import {
   runCaseInvestigation,
 } from "../services/investigation-service";
 import CaseDetails from "./case-details";
-import InvestigationReport, { DownloadReportButton } from "./investigation-report";
+import InvestigationReport from "./investigation-report";
 import AttackGraphPreview from "./attack-graph-preview";
 
 type View = "details" | "report" | "graph";
@@ -36,9 +36,11 @@ export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: s
   const [isLoading, setIsLoading] = useState(true);
   const [startTime, setStartTime] = useState<number>();
   const [attempt, setAttempt] = useState(0);
+  const [progressEvents, setProgressEvents] = useState<InvestigationProgressEvent[]>([]);
   const [view, setView] = useState<View>("details");
   const [isManualTimeRange, setIsManualTimeRange] = useState(false);
   const content = useRef<HTMLDivElement>(null);
+  const scrollPositions = useRef<Partial<Record<View, number>>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -58,7 +60,9 @@ export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: s
           ? attempt === 0
             ? prepared.turn
             : (await rerunPreparedTimeRangeInvestigation(caseId)).turn
-          : await runCaseInvestigation(selected, lookbackHours);
+          : await runCaseInvestigation(selected, lookbackHours, (event) => {
+              if (!cancelled) setProgressEvents((current) => [...current, event]);
+            });
         if (cancelled) return;
         if (result.case_id !== caseId) throw new Error("The returned investigation belongs to a different case.");
         setTurn(result);
@@ -84,12 +88,19 @@ export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: s
     setError(null);
     setView("details");
     setStartTime(Date.now());
+    setProgressEvents([]);
     setIsLoading(true);
     setAttempt((previous) => previous + 1);
   };
   const showView = (next: View) => {
+    const currentPosition = window.scrollY;
+    scrollPositions.current[view] = currentPosition;
+    const nextPosition = scrollPositions.current[next] ?? currentPosition;
     setView(next);
-    requestAnimationFrame(() => content.current?.focus());
+    requestAnimationFrame(() => {
+      content.current?.focus({ preventScroll: true });
+      window.scrollTo(0, nextPosition);
+    });
   };
   const ready = !isLoading && !error && value !== null && turn?.error === null;
 
@@ -144,7 +155,7 @@ export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: s
 
       {isLoading && <section aria-label="Investigation in progress" className="space-y-5">
         <p className="font-b1">Investigation can take several seconds. Your case stays visible while the result is prepared.</p>
-        <InvestigationLoader key={attempt} caseId={caseId} startTime={startTime} />
+        <InvestigationLoader key={attempt} caseId={caseId} events={progressEvents} startTime={startTime} />
         <Button type="button" disabled className="bg-neutral-200 font-b2 text-neutral-800">
           <LoaderCircle aria-hidden="true" className="size-4 motion-safe:animate-spin" />Preparing report…
         </Button>
@@ -158,19 +169,8 @@ export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: s
           : <ApiErrorView error={error} onRetry={retry} />
       )}
 
-      {ready && value && turn && <div className="flex flex-wrap items-center justify-between gap-4 rounded-[3px] border border-green-200 bg-green-100/30 px-4 py-3">
-        <div role="status" className="flex items-center gap-2 text-green-500">
-          <CheckCircle2 aria-hidden="true" className="size-5 shrink-0" />
-          <p className="font-b2"><span className="font-semibold">Investigation complete.</span> Your report is ready.</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {view !== "report" && <Button type="button" onClick={() => showView("report")} className="bg-primary-600 font-b2 text-white hover:bg-primary-700"><FileText aria-hidden="true" className="size-4" />View report</Button>}
-          <DownloadReportButton value={value} turn={turn} />
-        </div>
-      </div>}
-
       <div ref={content} tabIndex={-1} className="space-y-5 outline-none" aria-label={`${views.find((item) => item.id === view)?.label} content`}>
-        {view === "details" && value && <CaseDetails value={value} manualTimeRange={isManualTimeRange} />}
+        {!isLoading && view === "details" && value && <CaseDetails value={value} manualTimeRange={isManualTimeRange} />}
         {!isLoading && turn && value && <TurnResult turn={turn} onRetry={retry}>
           {view === "report" && <InvestigationReport value={value} turn={turn} />}
           {view === "details" && <div className="grid items-start gap-3 lg:grid-cols-2">
@@ -202,6 +202,7 @@ export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: s
             <AttackGraphPreview caseId={caseId} lookbackHours={lookbackHours} manualTimeRange={isManualTimeRange} expanded />
           </section>}
         </TurnResult>}
+        {!isLoading && view === "details" && <InvestigationLog events={progressEvents} />}
       </div>
     </div>
   );

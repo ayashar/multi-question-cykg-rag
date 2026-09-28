@@ -75,10 +75,10 @@ test("HTTP 200 pipeline errors suppress successful report content", () => {
   assert.match(success, /No threats found/);
 });
 
-test("investigation progress is explicitly estimated and accessible", () => {
+test("investigation progress exposes an accessible activity region", () => {
   const html = renderToStaticMarkup(<InvestigationLoader />);
   assert.match(html, /role="status"/);
-  assert.match(html, /not live backend progress/);
+  assert.match(html, /pipeline timeline/);
 });
 
 test("manual investigations explain why attack graphs are unavailable", () => {

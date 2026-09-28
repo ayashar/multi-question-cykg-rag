@@ -10,7 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type WheelEvent,
 } from "react";
-import { ArrowRight, GitMerge, LoaderCircle, Maximize2, Minus, Move, Plus } from "lucide-react";
+import { LoaderCircle, Maximize2, Minus, Move, Plus } from "lucide-react";
 import { getAttackGraph, type AttackGraphNode, type CaseAttackGraph } from "@/api";
 import { Button } from "@/components/ui/button";
 import { ApiErrorView } from "@/components/ui/error-states";
@@ -133,6 +133,85 @@ function GraphNodeCard({ node, rootCause }: { node: AttackGraphNode; rootCause: 
   );
 }
 
+function GraphPlane({ graph, layout }: { graph: CaseAttackGraph; layout: GraphLayout }) {
+  return (
+    <div className="absolute left-0 top-0 origin-top-left will-change-transform" style={{ width: layout.width, height: layout.height }}>
+      <svg aria-hidden="true" className="absolute inset-0 overflow-visible" width={layout.width} height={layout.height}>
+        {graph.edges.map((edge, index) => {
+          const source = layout.positions.get(edge.source);
+          const target = layout.positions.get(edge.target);
+          if (!source || !target) return null;
+          const sourceIsLeft = source.x <= target.x;
+          const x1 = sourceIsLeft ? source.x + NODE_WIDTH : source.x;
+          const x2 = sourceIsLeft ? target.x : target.x + NODE_WIDTH;
+          const y1 = source.y + NODE_HEIGHT / 2;
+          const y2 = target.y + NODE_HEIGHT / 2;
+          const controlOffset = Math.max(70, Math.abs(x2 - x1) * 0.45);
+          const path = `M ${x1} ${y1} C ${x1 + (sourceIsLeft ? controlOffset : -controlOffset)} ${y1}, ${x2 + (sourceIsLeft ? -controlOffset : controlOffset)} ${y2}, ${x2} ${y2}`;
+          const labelX = (x1 + x2) / 2;
+          const labelY = (y1 + y2) / 2;
+          const labelWidth = Math.max(78, edge.relation.length * 8 + 24);
+          return (
+            <g key={`${edge.source}-${edge.relation}-${edge.target}-${index}`}>
+              <path d={path} fill="none" stroke="#111111" strokeWidth="3" />
+              <rect x={labelX - labelWidth / 2} y={labelY - 14} width={labelWidth} height="28" rx="10" fill="#fdfdfd" stroke="#111111" strokeWidth="2" />
+              <text x={labelX} y={labelY + 4} textAnchor="middle" fill="#333333" fontSize="11" fontWeight="600" letterSpacing="1.1">{edge.relation.replaceAll("_", " ")}</text>
+            </g>
+          );
+        })}
+      </svg>
+      {graph.nodes.map((node) => {
+        const position = layout.positions.get(node.id);
+        if (!position) return null;
+        return <div key={node.id} style={{ position: "absolute", left: position.x, top: position.y }}><GraphNodeCard node={node} rootCause={node.id === layout.rootNodeId} /></div>;
+      })}
+    </div>
+  );
+}
+
+export function MiniAttackGraph({ graph }: { graph: CaseAttackGraph }) {
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const planeRef = useRef<HTMLDivElement>(null);
+  const layout = useMemo(() => buildGraphLayout(graph), [graph]);
+
+  const positionPreview = useCallback(() => {
+    const viewport = viewportRef.current;
+    const plane = planeRef.current;
+    if (!viewport || !plane) return;
+    const rootPosition = layout.rootNodeId ? layout.positions.get(layout.rootNodeId) : undefined;
+    const focus = rootPosition ?? { x: layout.width / 2 - NODE_WIDTH / 2, y: layout.height / 2 - NODE_HEIGHT / 2 };
+    const scale = Math.min(0.52, Math.max(0.32, viewport.clientWidth / 1100));
+    const x = viewport.clientWidth * 0.28 - (focus.x + NODE_WIDTH / 2) * scale;
+    const y = viewport.clientHeight / 2 - (focus.y + NODE_HEIGHT / 2) * scale;
+    plane.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+  }, [layout.height, layout.positions, layout.rootNodeId, layout.width]);
+
+  useEffect(() => {
+    positionPreview();
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const observer = new ResizeObserver(positionPreview);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [positionPreview]);
+
+  return (
+    <div
+      ref={viewportRef}
+      role="img"
+      aria-label={`Attack graph preview with ${graph.nodes.length} nodes and ${graph.edges.length} relationships. Open the full graph to explore it.`}
+      className="relative h-[260px] w-full overflow-hidden rounded-[3px] bg-[#606060]"
+    >
+      <div ref={planeRef} className="pointer-events-none absolute left-0 top-0 origin-top-left" style={{ width: layout.width, height: layout.height }}>
+        <GraphPlane graph={graph} layout={layout} />
+      </div>
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black-600/75 to-transparent px-3 pb-3 pt-10 text-white">
+        <p className="font-b3">Preview · Open the full graph to zoom and move</p>
+      </div>
+    </div>
+  );
+}
+
 function InteractiveAttackGraph({ graph }: { graph: CaseAttackGraph }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef({ pointerId: -1, x: 0, y: 0, originX: 0, originY: 0 });
@@ -249,35 +328,7 @@ function InteractiveAttackGraph({ graph }: { graph: CaseAttackGraph }) {
           className="absolute left-0 top-0 origin-top-left will-change-transform"
           style={{ width: layout.width, height: layout.height, transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})` }}
         >
-          <svg aria-hidden="true" className="absolute inset-0 overflow-visible" width={layout.width} height={layout.height}>
-            {graph.edges.map((edge, index) => {
-              const source = layout.positions.get(edge.source);
-              const target = layout.positions.get(edge.target);
-              if (!source || !target) return null;
-              const sourceIsLeft = source.x <= target.x;
-              const x1 = sourceIsLeft ? source.x + NODE_WIDTH : source.x;
-              const x2 = sourceIsLeft ? target.x : target.x + NODE_WIDTH;
-              const y1 = source.y + NODE_HEIGHT / 2;
-              const y2 = target.y + NODE_HEIGHT / 2;
-              const controlOffset = Math.max(70, Math.abs(x2 - x1) * 0.45);
-              const path = `M ${x1} ${y1} C ${x1 + (sourceIsLeft ? controlOffset : -controlOffset)} ${y1}, ${x2 + (sourceIsLeft ? -controlOffset : controlOffset)} ${y2}, ${x2} ${y2}`;
-              const labelX = (x1 + x2) / 2;
-              const labelY = (y1 + y2) / 2;
-              const labelWidth = Math.max(78, edge.relation.length * 8 + 24);
-              return (
-                <g key={`${edge.source}-${edge.relation}-${edge.target}-${index}`}>
-                  <path d={path} fill="none" stroke="#111111" strokeWidth="3" />
-                  <rect x={labelX - labelWidth / 2} y={labelY - 14} width={labelWidth} height="28" rx="10" fill="#fdfdfd" stroke="#111111" strokeWidth="2" />
-                  <text x={labelX} y={labelY + 4} textAnchor="middle" fill="#333333" fontSize="11" fontWeight="600" letterSpacing="1.1">{edge.relation.replaceAll("_", " ")}</text>
-                </g>
-              );
-            })}
-          </svg>
-          {graph.nodes.map((node) => {
-            const position = layout.positions.get(node.id);
-            if (!position) return null;
-            return <div key={node.id} style={{ position: "absolute", left: position.x, top: position.y }}><GraphNodeCard node={node} rootCause={node.id === layout.rootNodeId} /></div>;
-          })}
+          <GraphPlane graph={graph} layout={layout} />
         </div>
 
         <div className="pointer-events-none absolute bottom-3 left-3 z-20 flex items-center gap-2 rounded-[4px] bg-black-600/70 px-3 py-2 text-white">
@@ -329,27 +380,5 @@ export default function AttackGraphPreview({ caseId, lookbackHours, expanded = f
     );
   }
 
-  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
-  const edges = graph.edges.slice(0, 3);
-  const renderNode = (id: string) => {
-    const node = nodes.get(id);
-    return <div className={cn("min-w-0 flex-1 rounded-md border px-3 py-2", nodeColors[node?.type ?? ""] ?? "border-neutral-300 bg-neutral-100")}>
-      <p className="text-[10px] font-semibold uppercase tracking-wide">{node?.type.replaceAll("_", " ") ?? "Entity"}</p>
-      <p className="mt-1 font-b3 font-semibold wrap-anywhere">{node?.label ?? id}</p>
-    </div>;
-  };
-
-  return <div className="space-y-3">
-    <p className="flex items-center gap-2 font-b3 text-neutral-800"><GitMerge aria-hidden="true" className="size-4" />{graph.nodes.length} entities · {graph.edges.length} relationships</p>
-    {graph.root_cause_alert_id && <p className="font-b3 wrap-anywhere"><span className="font-semibold">Root-cause candidate: </span>{graph.root_cause_alert_id}</p>}
-    <ul className="space-y-3">
-      {edges.map((edge, index) => <li key={`${edge.source}-${edge.relation}-${edge.target}-${index}`} className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
-        {renderNode(edge.source)}
-        <div className="flex shrink-0 items-center justify-center gap-1 text-center text-[10px] text-neutral-800 sm:w-24 sm:flex-col"><span>{edge.relation.replaceAll("_", " ")}</span><ArrowRight aria-hidden="true" className="size-4" /></div>
-        {renderNode(edge.target)}
-      </li>)}
-    </ul>
-    {!edges.length && <div className="grid gap-2 sm:grid-cols-2">{graph.nodes.slice(0, 4).map((node) => <div key={node.id}>{renderNode(node.id)}</div>)}</div>}
-    {graph.edges.length > edges.length && <p className="font-b3 text-neutral-800">{graph.edges.length - edges.length} more relationships in the full view.</p>}
-  </div>;
+  return <MiniAttackGraph graph={graph} />;
 }
