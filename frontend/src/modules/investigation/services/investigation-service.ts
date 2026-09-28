@@ -171,24 +171,10 @@ export function runCaseInvestigation(value: Case, lookbackHours?: number): Promi
   const pending = pendingInvestigations.get(key);
   if (pending) return pending;
 
-  const request = (process.env.NEXT_PUBLIC_USE_MOCK === "true"
-    ? demoInvestigation(value)
-    : investigateCase(value.case_id, hours)
-  ).finally(() => pendingInvestigations.delete(key));
+  const request = investigateCase(value.case_id, hours)
+    .finally(() => pendingInvestigations.delete(key));
   pendingInvestigations.set(key, request);
   return request;
-}
-
-async function demoInvestigation(value: Case): Promise<TurnRecord> {
-  await new Promise((resolve) => setTimeout(resolve, 48_000));
-  return {
-    case_id: value.case_id, turn_index: 1, question: "Investigate this case.",
-    answer: `Demo report for ${value.alert_count} alerts associated with ${value.hosts.join(", ") || "this case"}. This is sample data, not a live security assessment.`,
-    critical_analysis: "The demo uses case metadata only. Run the investigation API to receive evidence-backed findings.",
-    mitigation_suggestions: [], recommended_priority: null, confidence: null,
-    mitre_techniques: value.mitre_techniques, cited_entities: value.alert_ids,
-    error: null, timestamp: new Date().toISOString(), latency_seconds: 48,
-  };
 }
 
 export function buildInvestigationReport(value: Case, turn: TurnRecord): string {

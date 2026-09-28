@@ -95,9 +95,20 @@ export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: s
 
   return (
     <div className="w-full space-y-5 pb-12 text-primary-1000">
-      <Link href="/cases" className={cn(buttonVariants(), "bg-primary-600 font-b2 text-white hover:bg-primary-700")}>
-        <ArrowLeft aria-hidden="true" className="size-5" />Back
-      </Link>
+      {view === "graph" ? (
+        <Button
+          type="button"
+          aria-label="Back to case details"
+          onClick={() => showView("details")}
+          className="bg-primary-600 font-b2 text-white hover:bg-primary-700"
+        >
+          <ArrowLeft aria-hidden="true" className="size-5" />Back
+        </Button>
+      ) : (
+        <Link href="/cases" className={cn(buttonVariants(), "bg-primary-600 font-b2 text-white hover:bg-primary-700")}>
+          <ArrowLeft aria-hidden="true" className="size-5" />Back
+        </Link>
+      )}
 
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
@@ -183,9 +194,12 @@ export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: s
               <div className="rounded-[4px] bg-background p-3"><AttackGraphPreview caseId={caseId} lookbackHours={lookbackHours} manualTimeRange={isManualTimeRange} /></div>
             </section>
           </div>}
-          {view === "graph" && <section className="space-y-4 rounded-[10px] bg-primary-100 p-5">
-            <h2 className="font-h6">Attack Graph</h2><p className="font-b2">Evidence relationships reconstructed for this case.</p>
-            <div className="rounded-[4px] bg-background p-4"><AttackGraphPreview caseId={caseId} lookbackHours={lookbackHours} manualTimeRange={isManualTimeRange} expanded /></div>
+          {view === "graph" && <section aria-labelledby="attack-graph-title" className="space-y-5">
+            <div>
+              <h2 id="attack-graph-title" className="font-h6">Attack Graph</h2>
+              <p className="font-b2">Explore the reconstructed evidence by zooming and moving around the canvas.</p>
+            </div>
+            <AttackGraphPreview caseId={caseId} lookbackHours={lookbackHours} manualTimeRange={isManualTimeRange} expanded />
           </section>}
         </TurnResult>}
       </div>
