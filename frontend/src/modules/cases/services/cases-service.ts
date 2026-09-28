@@ -1,3 +1,4 @@
+import { type TurnRecord } from "@/api";
 import { type Case, type InvestigatedCaseRecord, type LookbackPreset, LOOKBACK_HOURS_MAP } from "../types";
 import { MOCK_CASES } from "../data/cases-fixture";
 import { getCases as fetchCases, getIngestionStatus, registerCasesLookback, getCaseLookback } from "@/api";
@@ -23,19 +24,27 @@ export function getInvestigatedCases(): InvestigatedCaseRecord[] {
   }
 }
 
+export function getInvestigatedCase(caseId: string): InvestigatedCaseRecord | undefined {
+  return getInvestigatedCases().find((record) => record.case_id === caseId);
+}
+
 export function recordInvestigatedCase(
   c: Case,
   lookbackHours = getCaseLookback(c.case_id),
   source: InvestigatedCaseRecord["source"] = "case-list",
+  turn?: TurnRecord,
 ): void {
   if (typeof window === "undefined") return;
   try {
-    const current = getInvestigatedCases().filter((item) => item.case_id !== c.case_id);
+    const records = getInvestigatedCases();
+    const previous = records.find((item) => item.case_id === c.case_id);
+    const current = records.filter((item) => item.case_id !== c.case_id);
     const updated: InvestigatedCaseRecord[] = [
       {
         case_id: c.case_id,
         investigated_at: new Date().toISOString(),
         case: c,
+        turn: turn ?? previous?.turn,
         lookback_hours: lookbackHours,
         source,
       },

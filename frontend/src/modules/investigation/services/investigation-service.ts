@@ -126,10 +126,49 @@ export function clearTimeRangeInvestigationMemoryCache(): void {
   selectedCases.clear();
 }
 
+function demoTimeRangeCaseId(range: TimeRangeRequest): string {
+  let hash = 2_166_136_261;
+  for (const character of `${range.start}|${range.end}`) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return `demo-range-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+export function createDemoTimeRangeInvestigation(range: TimeRangeRequest): TurnRecord {
+  return {
+    case_id: demoTimeRangeCaseId(range),
+    turn_index: 1,
+    question: "Investigate this time range.",
+    answer: `Demo investigation for activity between ${range.start} and ${range.end}. The sample indicates a sequence of suspicious authentication and command-execution events that should be validated against the affected account and host.`,
+    critical_analysis: "This is frontend demonstration data. It verifies the report flow, persistence, and navigation without making a backend request.",
+    mitigation_suggestions: [
+      "Validate the sign-in activity with the account owner.",
+      "Review command execution and authentication logs for the selected period.",
+      "Isolate the affected host if the activity cannot be explained.",
+    ],
+    recommended_priority: "monitor",
+    confidence: "medium",
+    mitre_techniques: ["T1078", "T1059"],
+    cited_entities: ["demo-alert-001", "demo-host-01"],
+    error: null,
+    timestamp: new Date().toISOString(),
+    latency_seconds: 0.6,
+  };
+}
+
+export async function runTimeRangeInvestigation(range: TimeRangeRequest): Promise<TurnRecord> {
+  if (process.env.NEXT_PUBLIC_USE_MOCK === "true") {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    return createDemoTimeRangeInvestigation(range);
+  }
+  return investigateTimeRange(range);
+}
+
 export async function rerunPreparedTimeRangeInvestigation(caseId: string): Promise<PreparedTimeRangeInvestigation> {
   const prepared = getPreparedTimeRangeInvestigation(caseId);
   if (!prepared) throw new Error("The original manual time range is no longer available.");
-  const turn = await investigateTimeRange(prepared.range);
+  const turn = await runTimeRangeInvestigation(prepared.range);
   if (turn.case_id !== caseId) throw new Error("The returned investigation belongs to a different case.");
   return rememberTimeRangeInvestigation(prepared.range, turn);
 }
@@ -137,6 +176,11 @@ export async function rerunPreparedTimeRangeInvestigation(caseId: string): Promi
 export function getInvestigationHref(caseId: string, lookbackHours = getCaseLookback(caseId)): string {
   const path = `/cases/${encodeURIComponent(caseId)}`;
   return lookbackHours ? `${path}?lookback_hours=${lookbackHours}` : path;
+}
+
+export function getPastInvestigationHref(caseId: string, lookbackHours = getCaseLookback(caseId)): string {
+  const href = getInvestigationHref(caseId, lookbackHours);
+  return `${href}${href.includes("?") ? "&" : "?"}reopen=1`;
 }
 
 export function parseLookbackHours(value: string | string[] | undefined): number | undefined {

@@ -21,7 +21,7 @@ export default function Navbar({ title }: NavbarProps) {
   const displayTitle = title ?? routeTitles[pathname] ?? "Dashboard";
 
   return (
-    <header className="w-full border-b border-neutral-300 px-5 md:px-8 py-4 min-h-18.25 flex items-center justify-between bg-background sticky top-0 z-10">
+    <header className="w-full h-[84px] min-h-[84px] border-b-2 border-neutral-300 px-5 md:px-5 py-5 flex items-center justify-between bg-background sticky top-0 z-10">
       {pathname.startsWith("/cases/") && !title ? (
         <nav aria-label="Breadcrumb" className="flex items-center gap-2 font-h5 text-lg text-black-600 sm:text-[28px]">
           <Link href="/cases" className="font-normal hover:underline">Cases</Link>

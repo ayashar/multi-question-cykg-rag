@@ -4,18 +4,24 @@ import { clearLookbackStore, investigateCaseStream, registerCaseLookback, resetA
 import {
   buildInvestigationReport,
   clearTimeRangeInvestigationMemoryCache,
+  createDemoTimeRangeInvestigation,
   getInvestigationHref,
+  getPastInvestigationHref,
   getPreparedTimeRangeInvestigation,
   loadInvestigationCase,
   parseLookbackHours,
   rememberTimeRangeInvestigation,
   runCaseInvestigation,
+  runTimeRangeInvestigation,
 } from "@/modules/investigation/services/investigation-service";
-import { isManualInvestigatedCase, recordInvestigatedCase } from "@/modules/cases/services/cases-service";
+import { getInvestigatedCase, isManualInvestigatedCase, recordInvestigatedCase } from "@/modules/cases/services/cases-service";
 
 const originalFetch = globalThis.fetch;
+const originalMockMode = process.env.NEXT_PUBLIC_USE_MOCK;
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  if (originalMockMode === undefined) delete process.env.NEXT_PUBLIC_USE_MOCK;
+  else process.env.NEXT_PUBLIC_USE_MOCK = originalMockMode;
   clearLookbackStore();
   clearTimeRangeInvestigationMemoryCache();
   resetApiConfig();
@@ -92,6 +98,7 @@ test("report downloads include evidence and refuse failed or mismatched turns", 
 
 test("case links encode IDs and validate lookback query values", () => {
   assert.equal(getInvestigationHref("case/a?b", 720), "/cases/case%2Fa%3Fb?lookback_hours=720");
+  assert.equal(getPastInvestigationHref("case/a?b", 720), "/cases/case%2Fa%3Fb?lookback_hours=720&reopen=1");
   assert.equal(parseLookbackHours("720.5"), 720.5);
   for (const invalid of ["", "0", "-1", "Infinity", "invalid", ["24", "720"], undefined]) assert.equal(parseLookbackHours(invalid), undefined);
 });
@@ -107,6 +114,21 @@ test("FR3 prepares manual results for the canonical FR2 case route and report", 
   assert.equal(prepared.value.last_seen, range.end);
   assert.deepEqual(prepared.value.mitre_techniques, ["T1110"]);
   assert.deepEqual(getPreparedTimeRangeInvestigation(manualTurn.case_id), prepared);
+});
+
+test("FR3 mock mode returns a successful deterministic report without calling the backend", async () => {
+  const range = { start: "2022-01-21T02:00:00Z", end: "2022-01-21T04:00:00Z" };
+  process.env.NEXT_PUBLIC_USE_MOCK = "true";
+  globalThis.fetch = async () => {
+    throw new Error("mock mode must not call fetch");
+  };
+
+  const turn = await runTimeRangeInvestigation(range);
+  const repeated = createDemoTimeRangeInvestigation(range);
+  assert.equal(turn.case_id, repeated.case_id);
+  assert.equal(turn.error, null);
+  assert.match(turn.answer ?? "", /Demo investigation/);
+  assert.deepEqual(turn.mitre_techniques, ["T1078", "T1059"]);
 });
 
 test("FR3 restores manual results after the in-memory session is lost", () => {
@@ -131,10 +153,12 @@ test("FR3 restores manual results after the in-memory session is lost", () => {
     const range = { start: "2022-01-21T02:00:00Z", end: "2022-01-21T04:00:00Z" };
     const manualTurn = { ...turn, case_id: "manual-persisted", mitre_techniques: ["T1110"] };
     const prepared = rememberTimeRangeInvestigation(range, manualTurn);
+    recordInvestigatedCase(prepared.value, undefined, "manual-time-range", manualTurn);
     recordInvestigatedCase(prepared.value, undefined, "manual-time-range");
     clearTimeRangeInvestigationMemoryCache();
 
     assert.deepEqual(getPreparedTimeRangeInvestigation(manualTurn.case_id), prepared);
+    assert.deepEqual(getInvestigatedCase(manualTurn.case_id)?.turn, manualTurn);
     assert.equal(isManualInvestigatedCase(manualTurn.case_id), true);
     assert.match(localItems.get("kgcs_time_range_investigations") ?? "", /manual-persisted/);
   } finally {

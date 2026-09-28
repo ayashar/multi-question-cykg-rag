@@ -1,12 +1,11 @@
 "use client";
 
 import { ChevronRight, ChevronLeft } from "lucide-react";
-import Link from "next/link";
-import { getInvestigationHref, rememberInvestigationCase } from "@/modules/investigation/services/investigation-service";
+import { getInvestigationHref, getPastInvestigationHref, rememberInvestigationCase } from "@/modules/investigation/services/investigation-service";
 import { type Case, formatCaseTimeSpan } from "../types";
 import UrgencyIndicator, { getUrgencyStripeColor } from "./urgency-indicator";
 import MitreBadges from "./mitre-badges";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonLink } from "@/components/ui/button";
 
 interface CaseTableProps {
   cases: Case[];
@@ -16,6 +15,7 @@ interface CaseTableProps {
   onPrevPage: () => void;
   actionLabel?: string;
   lookbacks?: Record<string, number | undefined>;
+  reopenSaved?: boolean;
 }
 
 export default function CaseTable({
@@ -26,6 +26,7 @@ export default function CaseTable({
   onPrevPage,
   actionLabel = "Investigate",
   lookbacks,
+  reopenSaved = false,
 }: CaseTableProps) {
   return (
     <div className="w-full flex flex-col space-y-2">
@@ -91,12 +92,13 @@ export default function CaseTable({
                     <MitreBadges techniques={c.mitre_techniques} maxVisible={4} />
                   </td>
                   <td className="py-3 px-4 text-right rounded-r-[3px]">
-                    <Link href={getInvestigationHref(c.case_id, lookbacks?.[c.case_id])} onClick={() => rememberInvestigationCase(c)}
+                    <ButtonLink href={(reopenSaved ? getPastInvestigationHref : getInvestigationHref)(c.case_id, lookbacks?.[c.case_id])} onClick={() => rememberInvestigationCase(c)}
+                      variant="primary"
                       aria-label={`${actionLabel} ${c.case_id}`}
-                      className="inline-flex items-center gap-1 rounded-[3px] text-xs font-medium text-neutral-1000 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4">
+                      className="font-b2 focus-visible:outline-2 focus-visible:outline-offset-4">
                       <span>{actionLabel}</span>
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </Link>
+                      <ChevronRight aria-hidden="true" className="w-3.5 h-3.5" />
+                    </ButtonLink>
                   </td>
                 </tr>
               );
