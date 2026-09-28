@@ -1,6 +1,6 @@
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { clearLookbackStore, registerCaseLookback, resetApiConfig, type Case, type TurnRecord } from "@/api";
+import { clearLookbackStore, investigateCaseStream, registerCaseLookback, resetApiConfig, type Case, type InvestigationProgressEvent, type TurnRecord } from "@/api";
 import {
   buildInvestigationReport,
   clearTimeRangeInvestigationMemoryCache,
@@ -62,6 +62,16 @@ test("a rejected FR2 request is released so retry makes a fresh request", async 
   await assert.rejects(runCaseInvestigation(value), /Failed to fetch/);
   globalThis.fetch = async () => Response.json(turn);
   assert.deepEqual(await runCaseInvestigation(value), turn);
+});
+
+test("FR2 emits frontend pipeline events while resolving from the existing API", async () => {
+  const events: InvestigationProgressEvent[] = [];
+  globalThis.fetch = async () => Response.json(turn);
+  const result = await investigateCaseStream(value.case_id, (event) => events.push(event), 24, value);
+  assert.deepEqual(result, turn);
+  assert.equal(events[0].status, "running");
+  assert.equal(events.filter((event) => event.status === "complete").length, 6);
+  assert.equal(events.at(-1)?.type, "result");
 });
 
 test("direct FR2 links recover case context with the supplied window", async () => {

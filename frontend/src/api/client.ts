@@ -30,6 +30,19 @@ export interface TurnRecord {
   latency_seconds: number;
 }
 
+export interface InvestigationProgressEvent {
+  type: "agent" | "error" | "result";
+  status?: "running" | "complete";
+  agent?: string;
+  agent_id?: string;
+  label?: string;
+  messages?: string[];
+  message?: string;
+  timestamp: string;
+  elapsed_seconds?: number;
+  result?: TurnRecord;
+}
+
 export type AttackGraphNodeType =
   | "alert"
   | "host"

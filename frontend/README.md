@@ -1,14 +1,29 @@
 # ChatBot KGCS frontend
 
+### Frontend demo mode
+
+The frontend runs in self-contained demo mode by default. Cases, investigations,
+reports, time-range results, attack graphs, chat endpoint responses, ingestion
+status, and source configuration all use local dummy data and do not contact the
+backend. This makes every implemented screen available with only:
+
+```bash
+pnpm dev
+```
+
+Set `NEXT_PUBLIC_USE_MOCK=false` before starting or building the frontend to use
+the real investigation API. Demo source-configuration changes are kept only in
+frontend memory, while investigation history uses browser local storage.
+
 ### Investigation API
 
 The frontend handles `/backend/*` with a server-side Next.js route and forwards
 requests to `http://127.0.0.1:8000` by default, avoiding browser CORS issues.
 Set server-only `INVESTIGATION_API_URL` to change that destination and
 `INVESTIGATION_API_KEY` when the API requires a key. The key is added by the
-Next.js server and is never included in browser JavaScript. Mock cases are used
-only when `NEXT_PUBLIC_USE_MOCK=true`; request failures otherwise remain visible.
-The server route allows up to 120 seconds for investigations.
+Next.js server and is never included in browser JavaScript. When live mode is
+enabled, request failures remain visible and the server route allows up to 120
+seconds for investigations.
 
 Import endpoint functions from `@/api`. The shared client tracks pending requests
 and preserves each case's first discovery lookback in session storage (with an
@@ -37,9 +52,8 @@ findings, analysis, mitigations, priority, confidence, and citations;
 **Download report** exports them as Markdown. Network/auth errors support retry,
 404s can expand the discovery window, and pipeline failures suppress the report.
 
-With `NEXT_PUBLIC_USE_MOCK=true`, case investigations use a clearly labeled demo
-report and manual time-range submissions return deterministic sample findings
-without backend calls.
+In demo mode, a clearly labeled report completes in under a second without a
+backend call. The longer four-stage sequence remains available in live mode.
 
 ### FR3 — Manual time-range investigation
 

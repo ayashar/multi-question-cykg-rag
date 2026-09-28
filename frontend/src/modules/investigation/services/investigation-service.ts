@@ -1,11 +1,16 @@
 import {
-  ApiClientError, getApiConfig, getCaseLookback, investigateCase, investigateTimeRange,
-  registerCaseLookback, resolveCaseLookback, type Case, type TimeRangeRequest, type TurnRecord,
+  ApiClientError, getApiConfig, getCaseLookback, investigateCaseStream, investigateTimeRange,
+  registerCaseLookback, resolveCaseLookback, type Case, type InvestigationProgressEvent, type TimeRangeRequest, type TurnRecord,
 } from "@/api";
 import { getCases, getInvestigatedCases } from "@/modules/cases/services/cases-service";
 
 const selectedCases = new Map<string, Case>();
-const pendingInvestigations = new Map<string, Promise<TurnRecord>>();
+interface PendingInvestigation {
+  promise: Promise<TurnRecord>;
+  listeners: Set<(event: InvestigationProgressEvent) => void>;
+}
+
+const pendingInvestigations = new Map<string, PendingInvestigation>();
 const CASE_KEY = "kgcs_selected_case:";
 const TIME_RANGE_KEY = "kgcs_time_range_investigation:";
 const TIME_RANGE_STORE_KEY = "kgcs_time_range_investigations";
@@ -208,31 +213,28 @@ export async function loadInvestigationCase(caseId: string, lookbackHours?: numb
 }
 
 /** Share an in-flight POST across remounts so React Strict Mode cannot run it twice. */
-export function runCaseInvestigation(value: Case, lookbackHours?: number): Promise<TurnRecord> {
+export function runCaseInvestigation(
+  value: Case,
+  lookbackHours?: number,
+  onProgress?: (event: InvestigationProgressEvent) => void,
+): Promise<TurnRecord> {
   const hours = resolveCaseLookback(value.case_id, lookbackHours) ?? 336;
   const config = getApiConfig();
   const key = JSON.stringify([config.baseUrl, value.case_id, hours]);
   const pending = pendingInvestigations.get(key);
-  if (pending) return pending;
+  if (pending) {
+    if (onProgress) pending.listeners.add(onProgress);
+    return pending.promise;
+  }
 
-  const request = (process.env.NEXT_PUBLIC_USE_MOCK === "true"
-    ? demoInvestigation(value)
-    : investigateCase(value.case_id, hours)
-  ).finally(() => pendingInvestigations.delete(key));
-  pendingInvestigations.set(key, request);
+  const listeners = new Set<(event: InvestigationProgressEvent) => void>();
+  if (onProgress) listeners.add(onProgress);
+  const request = investigateCaseStream(value.case_id, (event) => {
+    for (const listener of listeners) listener(event);
+  }, hours, value)
+    .finally(() => pendingInvestigations.delete(key));
+  pendingInvestigations.set(key, { promise: request, listeners });
   return request;
-}
-
-async function demoInvestigation(value: Case): Promise<TurnRecord> {
-  await new Promise((resolve) => setTimeout(resolve, 48_000));
-  return {
-    case_id: value.case_id, turn_index: 1, question: "Investigate this case.",
-    answer: `Demo report for ${value.alert_count} alerts associated with ${value.hosts.join(", ") || "this case"}. This is sample data, not a live security assessment.`,
-    critical_analysis: "The demo uses case metadata only. Run the investigation API to receive evidence-backed findings.",
-    mitigation_suggestions: [], recommended_priority: null, confidence: null,
-    mitre_techniques: value.mitre_techniques, cited_entities: value.alert_ids,
-    error: null, timestamp: new Date().toISOString(), latency_seconds: 48,
-  };
 }
 
 export function buildInvestigationReport(value: Case, turn: TurnRecord): string {
