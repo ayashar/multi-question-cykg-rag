@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowUpRight, CheckCircle2, FileText, GitMerge, LayoutGrid, LoaderCircle } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, CheckCircle2, FileText, GitMerge, LayoutGrid, LoaderCircle, MessageSquare } from "lucide-react";
 import { ApiClientError, resolveCaseLookback, type Case, type TurnRecord } from "@/api";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button, ButtonLink } from "@/components/ui/button";
 import { ApiErrorView, CaseNotFoundError, TurnResult } from "@/components/ui/error-states";
 import { InvestigationLoader } from "@/components/ui/investigation-loader";
-import { isManualInvestigatedCase, recordInvestigatedCase } from "@/modules/cases/services/cases-service";
+import { getInvestigatedCase, isManualInvestigatedCase, recordInvestigatedCase } from "@/modules/cases/services/cases-service";
 import { cn } from "@/lib/utils";
 import {
   getInvestigationHref,
@@ -20,30 +19,61 @@ import {
 import CaseDetails from "./case-details";
 import InvestigationReport, { DownloadReportButton } from "./investigation-report";
 import AttackGraphPreview from "./attack-graph-preview";
+import InvestigationChatroom from "./investigation-chatroom";
 
-type View = "details" | "report" | "graph";
+type View = "details" | "report" | "graph" | "chat";
 const views = [
   { id: "details", label: "Details", icon: LayoutGrid },
   { id: "report", label: "Report", icon: FileText },
   { id: "graph", label: "Attack Graph", icon: GitMerge },
+  { id: "chat", label: "Chatbot", icon: MessageSquare },
 ] as const;
 
-export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: string; lookbackHours?: number }) {
+export default function CaseInvestigation({
+  caseId,
+  lookbackHours,
+  initialView = "details",
+  reopenSaved = false,
+  chatUnavailable = false,
+}: {
+  caseId: string;
+  lookbackHours?: number;
+  initialView?: View;
+  reopenSaved?: boolean;
+  chatUnavailable?: boolean;
+}) {
   const router = useRouter();
   const [value, setValue] = useState<Case | null>(null);
   const [turn, setTurn] = useState<TurnRecord | null>(null);
   const [error, setError] = useState<Error | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!reopenSaved && !chatUnavailable);
   const [startTime, setStartTime] = useState<number>();
   const [attempt, setAttempt] = useState(0);
-  const [view, setView] = useState<View>("details");
+  const [view, setView] = useState<View>(initialView);
   const [isManualTimeRange, setIsManualTimeRange] = useState(false);
   const content = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
     async function investigate() {
+      if (chatUnavailable) {
+        setIsLoading(false);
+        return;
+      }
+
       try {
+        if (reopenSaved && attempt === 0) {
+          const saved = getInvestigatedCase(caseId);
+          if (saved?.turn?.case_id === caseId && saved.turn.error === null) {
+            setValue(saved.case);
+            setTurn(saved.turn);
+            setIsManualTimeRange(saved.source === "manual-time-range");
+            setIsLoading(false);
+            return;
+          }
+        }
+
+        setIsLoading(true);
         const prepared = getPreparedTimeRangeInvestigation(caseId);
         if (!prepared && isManualInvestigatedCase(caseId)) {
           throw new Error("The saved manual investigation is incomplete. Start it again from Time Span Case.");
@@ -67,6 +97,7 @@ export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: s
             selected,
             prepared ? undefined : resolveCaseLookback(caseId, lookbackHours) ?? 336,
             prepared ? "manual-time-range" : "case-list",
+            result,
           );
         }
       } catch (reason) {
@@ -77,27 +108,43 @@ export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: s
     }
     void investigate();
     return () => { cancelled = true; };
-  }, [caseId, lookbackHours, attempt]);
+  }, [caseId, lookbackHours, attempt, reopenSaved, chatUnavailable]);
+
+  useEffect(() => {
+    if (!value || !turn || turn.error !== null || turn.case_id !== value.case_id) return;
+    if (getInvestigatedCase(caseId)?.turn?.timestamp === turn.timestamp) return;
+    recordInvestigatedCase(
+      value,
+      isManualTimeRange ? undefined : resolveCaseLookback(caseId, lookbackHours) ?? 336,
+      isManualTimeRange ? "manual-time-range" : "case-list",
+      turn,
+    );
+  }, [caseId, isManualTimeRange, lookbackHours, turn, value]);
 
   const retry = () => {
     setTurn(null);
     setError(null);
-    setView("details");
+    setView(initialView);
     setStartTime(Date.now());
     setIsLoading(true);
     setAttempt((previous) => previous + 1);
   };
   const showView = (next: View) => {
     setView(next);
+    const url = new URL(window.location.href);
+    if (next === "details") url.searchParams.delete("view");
+    else url.searchParams.set("view", next);
+    url.searchParams.delete("chat_state");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
     requestAnimationFrame(() => content.current?.focus());
   };
   const ready = !isLoading && !error && value !== null && turn?.error === null;
 
   return (
     <div className="w-full space-y-5 pb-12 text-primary-1000">
-      <Link href="/cases" className={cn(buttonVariants(), "bg-primary-600 font-b2 text-white hover:bg-primary-700")}>
+      <ButtonLink href="/cases" variant="primary" className="font-b2">
         <ArrowLeft aria-hidden="true" className="size-5" />Back
-      </Link>
+      </ButtonLink>
 
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
@@ -106,22 +153,21 @@ export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: s
           {isManualTimeRange && <p className="font-b3 text-primary-700">Manual time-range investigation</p>}
           {process.env.NEXT_PUBLIC_USE_MOCK === "true" && <p className="font-b3 text-primary-700">Demo mode · sample data</p>}
         </div>
-        {ready && <nav aria-label="Investigation views" className="flex flex-wrap gap-2 sm:gap-3">
+        {(ready || chatUnavailable) && <nav aria-label="Investigation views" className="flex flex-wrap gap-2 sm:gap-3">
           {views.map(({ id, label, icon: Icon }) => {
             const graphUnavailable = isManualTimeRange && id === "graph";
+            const unavailableBeforeInvestigation = chatUnavailable && id !== "chat";
             return (
               <Button
                 key={id}
                 type="button"
                 aria-pressed={view === id}
                 onClick={() => showView(id)}
-                disabled={graphUnavailable}
+                disabled={graphUnavailable || unavailableBeforeInvestigation}
                 title={graphUnavailable ? "Attack graph is unavailable for manual time-range investigations." : undefined}
+                variant={view === id ? "primary" : "secondary"}
                 className={cn(
                   "font-b2 disabled:cursor-not-allowed disabled:opacity-55",
-                  view === id
-                    ? "bg-primary-600 text-white hover:bg-primary-700"
-                    : "bg-neutral-200 text-neutral-1000 hover:bg-neutral-300",
                 )}
               >
                 <Icon aria-hidden="true" className="size-4" />{label}
@@ -159,6 +205,7 @@ export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: s
       </div>}
 
       <div ref={content} tabIndex={-1} className="space-y-5 outline-none" aria-label={`${views.find((item) => item.id === view)?.label} content`}>
+        {chatUnavailable && view === "chat" && <InvestigationChatroom caseId={caseId} hasInvestigation={false} />}
         {view === "details" && value && <CaseDetails value={value} manualTimeRange={isManualTimeRange} />}
         {!isLoading && turn && value && <TurnResult turn={turn} onRetry={retry}>
           {view === "report" && <InvestigationReport value={value} turn={turn} />}
@@ -187,6 +234,9 @@ export default function CaseInvestigation({ caseId, lookbackHours }: { caseId: s
             <h2 className="font-h6">Attack Graph</h2><p className="font-b2">Evidence relationships reconstructed for this case.</p>
             <div className="rounded-[4px] bg-background p-4"><AttackGraphPreview caseId={caseId} lookbackHours={lookbackHours} manualTimeRange={isManualTimeRange} expanded /></div>
           </section>}
+          <div className={view === "chat" ? undefined : "hidden"}>
+            <InvestigationChatroom caseId={caseId} value={value} initialTurns={[turn]} />
+          </div>
         </TurnResult>}
       </div>
     </div>

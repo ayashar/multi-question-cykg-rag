@@ -6,6 +6,7 @@ import {
   clearTimeRangeInvestigationMemoryCache,
   createDemoTimeRangeInvestigation,
   getInvestigationHref,
+  getPastInvestigationHref,
   getPreparedTimeRangeInvestigation,
   loadInvestigationCase,
   parseLookbackHours,
@@ -13,7 +14,7 @@ import {
   runCaseInvestigation,
   runTimeRangeInvestigation,
 } from "@/modules/investigation/services/investigation-service";
-import { isManualInvestigatedCase, recordInvestigatedCase } from "@/modules/cases/services/cases-service";
+import { getInvestigatedCase, isManualInvestigatedCase, recordInvestigatedCase } from "@/modules/cases/services/cases-service";
 
 const originalFetch = globalThis.fetch;
 const originalMockMode = process.env.NEXT_PUBLIC_USE_MOCK;
@@ -87,6 +88,7 @@ test("report downloads include evidence and refuse failed or mismatched turns", 
 
 test("case links encode IDs and validate lookback query values", () => {
   assert.equal(getInvestigationHref("case/a?b", 720), "/cases/case%2Fa%3Fb?lookback_hours=720");
+  assert.equal(getPastInvestigationHref("case/a?b", 720), "/cases/case%2Fa%3Fb?lookback_hours=720&reopen=1");
   assert.equal(parseLookbackHours("720.5"), 720.5);
   for (const invalid of ["", "0", "-1", "Infinity", "invalid", ["24", "720"], undefined]) assert.equal(parseLookbackHours(invalid), undefined);
 });
@@ -141,10 +143,12 @@ test("FR3 restores manual results after the in-memory session is lost", () => {
     const range = { start: "2022-01-21T02:00:00Z", end: "2022-01-21T04:00:00Z" };
     const manualTurn = { ...turn, case_id: "manual-persisted", mitre_techniques: ["T1110"] };
     const prepared = rememberTimeRangeInvestigation(range, manualTurn);
+    recordInvestigatedCase(prepared.value, undefined, "manual-time-range", manualTurn);
     recordInvestigatedCase(prepared.value, undefined, "manual-time-range");
     clearTimeRangeInvestigationMemoryCache();
 
     assert.deepEqual(getPreparedTimeRangeInvestigation(manualTurn.case_id), prepared);
+    assert.deepEqual(getInvestigatedCase(manualTurn.case_id)?.turn, manualTurn);
     assert.equal(isManualInvestigatedCase(manualTurn.case_id), true);
     assert.match(localItems.get("kgcs_time_range_investigations") ?? "", /manual-persisted/);
   } finally {

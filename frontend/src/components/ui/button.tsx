@@ -1,5 +1,6 @@
 import { cva, type VariantProps } from "class-variance-authority";
 import type * as React from "react";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
@@ -7,6 +8,8 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
+        primary: "bg-primary-600 text-white hover:bg-primary-700",
+        secondary: "bg-neutral-200 text-neutral-1000 hover:bg-neutral-300",
         purple: "bg-purple-600 hover:bg-purple-700 text-neutral-100",
         disabled: "bg-black-200 cursor-not-allowed text-black",
       },
@@ -27,6 +30,8 @@ type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> &
     isActive?: boolean;
   };
 
+type ButtonLinkProps = React.ComponentProps<typeof Link> & VariantProps<typeof buttonVariants>;
+
 function Button({
   className,
   variant,
@@ -43,4 +48,8 @@ function Button({
   );
 }
 
-export { Button, buttonVariants };
+function ButtonLink({ className, variant, size, ...props }: ButtonLinkProps) {
+  return <Link className={cn(buttonVariants({ variant, size }), className)} {...props} />;
+}
+
+export { Button, ButtonLink, buttonVariants };

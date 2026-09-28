@@ -25,7 +25,13 @@ export function DownloadReportButton({ value, turn }: { value: Case; turn: TurnR
   </Button>;
 }
 
-export default function InvestigationReport({ value, turn }: { value: Case; turn: TurnRecord }) {
+export default function InvestigationReport({
+  value,
+  turn,
+}: {
+  value: Case;
+  turn: TurnRecord;
+}) {
   return (
     <TurnResult turn={turn}>
       <article aria-labelledby="report-title" className="space-y-6 rounded-[10px] border border-primary-200 bg-background p-5 sm:p-6">

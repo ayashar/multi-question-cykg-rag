@@ -173,6 +173,11 @@ export function getInvestigationHref(caseId: string, lookbackHours = getCaseLook
   return lookbackHours ? `${path}?lookback_hours=${lookbackHours}` : path;
 }
 
+export function getPastInvestigationHref(caseId: string, lookbackHours = getCaseLookback(caseId)): string {
+  const href = getInvestigationHref(caseId, lookbackHours);
+  return `${href}${href.includes("?") ? "&" : "?"}reopen=1`;
+}
+
 export function parseLookbackHours(value: string | string[] | undefined): number | undefined {
   const hours = typeof value === "string" && value.trim() ? Number(value) : NaN;
   return Number.isFinite(hours) && hours > 0 ? hours : undefined;

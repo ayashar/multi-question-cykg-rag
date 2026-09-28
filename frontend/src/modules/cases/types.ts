@@ -1,4 +1,4 @@
-import type { Case } from "@/api";
+import type { Case, TurnRecord } from "@/api";
 export type { Case } from "@/api";
 
 export type LookbackPreset = "24h" | "7d" | "30d" | "all";
@@ -28,6 +28,7 @@ export interface InvestigatedCaseRecord {
   case_id: string;
   investigated_at: string;
   case: Case;
+  turn?: TurnRecord;
   lookback_hours?: number;
   source?: "case-list" | "manual-time-range";
 }

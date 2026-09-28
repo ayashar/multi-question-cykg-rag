@@ -19,7 +19,7 @@ const getSnapshot = () => {
 };
 const getServerSnapshot = () => "[]";
 
-export default function InvestigatedCasesSection() {
+export default function InvestigatedCasesSection({ standalone = false }: { standalone?: boolean }) {
   const historySnapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const history = historySnapshot === "[]" ? [] : getInvestigatedCases();
   const investigatedCases: Case[] = history.map((h) => h.case);
@@ -27,14 +27,19 @@ export default function InvestigatedCasesSection() {
   const itemsPerPage = 5;
 
   if (investigatedCases.length === 0) {
-    return null;
+    return standalone ? (
+      <section className="rounded-[10px] bg-primary-100 p-6">
+        <h1 className="font-h5 text-neutral-1000">Past Investigation</h1>
+        <p className="mt-1 font-b2 text-neutral-800">Completed investigations will appear here after you investigate a case.</p>
+      </section>
+    ) : null;
   }
 
   const totalPages = Math.max(1, Math.ceil(investigatedCases.length / itemsPerPage));
   const paginatedCases = investigatedCases.slice((page - 1) * itemsPerPage, page * itemsPerPage);
 
   return (
-    <section className="space-y-3 pt-6">
+    <section className={standalone ? "space-y-3" : "space-y-3 pt-6"}>
       <div>
         <h2 className="font-h5 text-neutral-1000 font-bold tracking-tight text-2xl sm:text-3xl">
           See again your investigated cases.
@@ -50,6 +55,7 @@ export default function InvestigatedCasesSection() {
 
       <CaseTable
         actionLabel="View investigation"
+        reopenSaved
         lookbacks={Object.fromEntries(history.map((record) => [record.case_id, record.lookback_hours]))}
         cases={paginatedCases}
         currentPage={page}
