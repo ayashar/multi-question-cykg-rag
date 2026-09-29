@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowUpRight, FileText, GitMerge, LayoutGrid, LoaderCircle } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, FileText, GitMerge, LayoutGrid, LoaderCircle, MessageSquare } from "lucide-react";
 import { ApiClientError, resolveCaseLookback, type Case, type InvestigationProgressEvent, type TurnRecord } from "@/api";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { ApiErrorView, CaseNotFoundError, TurnResult } from "@/components/ui/error-states";
 import { InvestigationLoader, InvestigationLog } from "@/components/ui/investigation-loader";
-import { isManualInvestigatedCase, recordInvestigatedCase } from "@/modules/cases/services/cases-service";
+import { getInvestigatedCase, isManualInvestigatedCase, recordInvestigatedCase } from "@/modules/cases/services/cases-service";
 import { cn } from "@/lib/utils";
 import {
   getInvestigationHref,
@@ -50,7 +51,7 @@ export default function CaseInvestigation({
   const [startTime, setStartTime] = useState<number>();
   const [attempt, setAttempt] = useState(0);
   const [progressEvents, setProgressEvents] = useState<InvestigationProgressEvent[]>([]);
-  const [view, setView] = useState<View>("details");
+  const [view, setView] = useState<View>(initialView);
   const [isManualTimeRange, setIsManualTimeRange] = useState(false);
   const content = useRef<HTMLDivElement>(null);
   const scrollPositions = useRef<Partial<Record<View, number>>>({});
