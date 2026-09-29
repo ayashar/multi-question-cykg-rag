@@ -40,7 +40,7 @@ export default function CaseTable({
               <th className="py-2.5 px-4 font-normal">Host/User</th>
               <th className="py-2.5 px-4 w-20 text-center font-normal">Alerts</th>
               <th className="py-2.5 px-4 font-normal">MITRE</th>
-              <th className="py-2.5 px-4 w-32 text-right rounded-r-[3px]"></th>
+              <th className="w-48 rounded-r-[3px] px-4 py-2.5 text-right"></th>
             </tr>
           </thead>
           <tbody>
@@ -91,12 +91,12 @@ export default function CaseTable({
                   <td className="py-3 px-4">
                     <MitreBadges techniques={c.mitre_techniques} maxVisible={4} />
                   </td>
-                  <td className="py-3 px-4 text-right rounded-r-[3px]">
+                  <td className="whitespace-nowrap rounded-r-[3px] px-4 py-3 text-right">
                     <ButtonLink href={(reopenSaved ? getPastInvestigationHref : getInvestigationHref)(c.case_id, lookbacks?.[c.case_id])} onClick={() => rememberInvestigationCase(c)}
                       variant="primary"
                       aria-label={`${actionLabel} ${c.case_id}`}
-                      className="font-b2 focus-visible:outline-2 focus-visible:outline-offset-4">
-                      <span>{actionLabel}</span>
+                      className="font-b2 shrink-0 whitespace-nowrap focus-visible:outline-2 focus-visible:outline-offset-4">
+                      <span className="whitespace-nowrap">{actionLabel}</span>
                       <ChevronRight aria-hidden="true" className="w-3.5 h-3.5" />
                     </ButtonLink>
                   </td>

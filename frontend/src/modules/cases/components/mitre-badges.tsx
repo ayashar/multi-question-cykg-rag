@@ -14,7 +14,7 @@ export default function MitreBadges({ techniques, maxVisible = 4 }: MitreBadgesP
   const remainingCount = techniques.length - maxVisible;
 
   return (
-    <div className="grid grid-cols-2 gap-1 max-w-[170px]">
+    <div className="flex w-fit max-w-full flex-wrap gap-1">
       {visibleTechniques.map((tech) => {
         const urlPath = tech.includes(".") ? tech.replace(".", "/") : tech;
         const mitreUrl = `https://attack.mitre.org/techniques/${urlPath}/`;
@@ -27,7 +27,7 @@ export default function MitreBadges({ techniques, maxVisible = 4 }: MitreBadgesP
             rel="noopener noreferrer"
             title={`View ${tech} on MITRE ATT&CK`}
             onClick={(e) => e.stopPropagation()}
-            className="inline-flex items-center justify-center px-2 py-0.5 rounded-[3px] bg-[#4a3b59] hover:bg-[#392d45] text-white font-mono text-[10px] font-medium transition-colors cursor-pointer text-center truncate"
+            className="inline-flex w-fit max-w-full items-center justify-center whitespace-nowrap px-2 py-0.5 rounded-[3px] bg-[#4a3b59] hover:bg-[#392d45] text-white font-mono text-[10px] font-medium transition-colors cursor-pointer text-center"
           >
             {tech}
           </a>
@@ -36,7 +36,7 @@ export default function MitreBadges({ techniques, maxVisible = 4 }: MitreBadgesP
 
       {remainingCount > 0 && (
         <span
-          className="inline-flex items-center justify-center px-1.5 py-0.5 rounded-[3px] bg-[#392d45]/70 text-white/90 font-mono text-[10px] font-medium text-center"
+          className="inline-flex w-fit items-center justify-center whitespace-nowrap px-1.5 py-0.5 rounded-[3px] bg-[#392d45]/70 text-white/90 font-mono text-[10px] font-medium text-center"
           title={techniques.slice(maxVisible).join(", ")}
         >
           +{remainingCount}

@@ -1,4 +1,4 @@
-import { type TurnRecord } from "@/api";
+import { type InvestigationProgressEvent, type TurnRecord } from "@/api";
 import { type Case, type InvestigatedCaseRecord, type LookbackPreset, LOOKBACK_HOURS_MAP } from "../types";
 import { MOCK_CASES } from "../data/cases-fixture";
 import { getCases as fetchCases, getIngestionStatus, registerCasesLookback, getCaseLookback } from "@/api";
@@ -33,6 +33,7 @@ export function recordInvestigatedCase(
   lookbackHours = getCaseLookback(c.case_id),
   source: InvestigatedCaseRecord["source"] = "case-list",
   turn?: TurnRecord,
+  progressEvents?: InvestigationProgressEvent[],
 ): void {
   if (typeof window === "undefined") return;
   try {
@@ -45,6 +46,7 @@ export function recordInvestigatedCase(
         investigated_at: new Date().toISOString(),
         case: c,
         turn: turn ?? previous?.turn,
+        progress_events: progressEvents ?? previous?.progress_events,
         lookback_hours: lookbackHours,
         source,
       },

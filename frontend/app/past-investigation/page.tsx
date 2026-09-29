@@ -37,6 +37,7 @@ export default function PastInvestigationPage() {
       {demoFallback && <div className="rounded-[3px] border border-primary-300 bg-primary-100/50 px-4 py-3 font-b2 text-primary-900">Demo mode · sample history is shown until you investigate a case yourself.</div>}
       {cases.length > 0 ? <CaseTable
         actionLabel="View investigation"
+        reopenSaved
         lookbacks={lookbacks}
         cases={visibleCases}
         currentPage={page}
