@@ -2,7 +2,10 @@
 
 import { useState, useSyncExternalStore } from "react";
 import { Case } from "../types";
-import { getInvestigatedCases } from "../services/cases-service";
+import {
+  INVESTIGATED_CASES_STORAGE_KEY,
+  parseInvestigatedCases,
+} from "../services/cases-service";
 import CaseTable from "./case-table";
 
 const subscribe = (callback: () => void) => {
@@ -14,14 +17,14 @@ const subscribe = (callback: () => void) => {
   };
 };
 const getSnapshot = () => {
-  try { return localStorage.getItem("kgcs_investigated_cases") || "[]"; }
+  try { return localStorage.getItem(INVESTIGATED_CASES_STORAGE_KEY) || "[]"; }
   catch { return "[]"; }
 };
 const getServerSnapshot = () => "[]";
 
 export default function InvestigatedCasesSection({ standalone = false }: { standalone?: boolean }) {
   const historySnapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-  const history = historySnapshot === "[]" ? [] : getInvestigatedCases();
+  const history = parseInvestigatedCases(historySnapshot);
   const investigatedCases: Case[] = history.map((h) => h.case);
   const [page, setPage] = useState<number>(1);
   const itemsPerPage = 5;

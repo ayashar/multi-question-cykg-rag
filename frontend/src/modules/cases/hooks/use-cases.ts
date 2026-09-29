@@ -2,12 +2,32 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 import { type Case, type LookbackPreset } from "../types";
-import { getCases, resolveLookbackHours } from "../services/cases-service";
+import {
+  excludeInvestigatedCases,
+  getCases,
+  INVESTIGATED_CASES_STORAGE_KEY,
+  parseInvestigatedCases,
+  resolveLookbackHours,
+} from "../services/cases-service";
 
 const PRESET_KEY = "kgcs_active_lookback_preset";
 const HOURS_KEY = "kgcs_active_lookback_hours";
 const PRESET_EVENT = "kgcs-lookback-change";
 const validPresets = new Set<LookbackPreset>(["24h", "7d", "30d", "all"]);
+
+const subscribeHistory = (callback: () => void) => {
+  window.addEventListener("storage", callback);
+  window.addEventListener("kgcs-investigation-history-change", callback);
+  return () => {
+    window.removeEventListener("storage", callback);
+    window.removeEventListener("kgcs-investigation-history-change", callback);
+  };
+};
+
+const getHistorySnapshot = () => {
+  try { return localStorage.getItem(INVESTIGATED_CASES_STORAGE_KEY) ?? "[]"; }
+  catch { return "[]"; }
+};
 
 const subscribePreset = (callback: () => void) => {
   window.addEventListener("storage", callback);
@@ -29,8 +49,9 @@ const getPresetSnapshot = (): LookbackPreset => {
 
 export function useCases(initialPreset: LookbackPreset = "24h", itemsPerPage: number = 5) {
   const storedPreset = useSyncExternalStore(subscribePreset, getPresetSnapshot, () => initialPreset);
+  const storedHistory = useSyncExternalStore(subscribeHistory, getHistorySnapshot, () => "[]");
   const preset = storedPreset;
-  const [cases, setCases] = useState<Case[]>([]);
+  const [fetchedCases, setFetchedCases] = useState<Case[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<Error | null>(null);
@@ -57,7 +78,7 @@ export function useCases(initialPreset: LookbackPreset = "24h", itemsPerPage: nu
         try { sessionStorage.setItem(HOURS_KEY, String(hours)); } catch { /* Persistence is optional. */ }
         const data = await getCases(hours);
         if (request !== latestRequest.current) return;
-        setCases(data);
+        setFetchedCases(data);
         setPage(1);
       } catch (err: unknown) {
         if (request !== latestRequest.current) return;
@@ -78,14 +99,20 @@ export function useCases(initialPreset: LookbackPreset = "24h", itemsPerPage: nu
     void fetchCaseList(preset);
   }, [fetchCaseList, preset]);
 
+  const cases = useMemo(() => {
+    return excludeInvestigatedCases(fetchedCases, parseInvestigatedCases(storedHistory));
+  }, [fetchedCases, storedHistory]);
+
   const totalPages = useMemo(() => {
     return Math.max(1, Math.ceil(cases.length / itemsPerPage));
   }, [cases.length, itemsPerPage]);
 
+  const currentPage = Math.min(page, totalPages);
+
   const paginatedCases = useMemo(() => {
-    const startIndex = (page - 1) * itemsPerPage;
+    const startIndex = (currentPage - 1) * itemsPerPage;
     return cases.slice(startIndex, startIndex + itemsPerPage);
-  }, [cases, page, itemsPerPage]);
+  }, [cases, currentPage, itemsPerPage]);
 
   const handleNextPage = () => {
     setPage((prev) => Math.min(prev + 1, totalPages));
@@ -103,7 +130,7 @@ export function useCases(initialPreset: LookbackPreset = "24h", itemsPerPage: nu
     isLoading,
     isRefreshing,
     error,
-    page,
+    page: currentPage,
     totalPages,
     totalCount: cases.length,
     setPage,

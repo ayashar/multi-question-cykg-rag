@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useRef, useState } from "react";
 import { AlertCircle, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -12,19 +12,9 @@ import {
 } from "../services/investigation-service";
 import { getMaxTimeRangeDays, validateTimeRange } from "../services/time-range-validation";
 import TimeRangeErrorState from "./time-range-error-state";
+import type { InvestigationProgressEvent } from "@/api";
 
 type ValidationErrors = ReturnType<typeof validateTimeRange>["errors"];
-
-function getTimeZoneLabel(): string {
-  try {
-    const parts = new Intl.DateTimeFormat("en", {
-      timeZoneName: "longOffset",
-    }).formatToParts(new Date());
-    return parts.find((part) => part.type === "timeZoneName")?.value ?? "local time";
-  } catch {
-    return "local time";
-  }
-}
 
 export default function TimeRangeForm() {
   const router = useRouter();
@@ -34,7 +24,9 @@ export default function TimeRangeForm() {
   const [requestError, setRequestError] = useState<unknown>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [startedAt, setStartedAt] = useState<number>();
-  const timeZoneLabel = useMemo(() => getTimeZoneLabel(), []);
+  const [progressEvents, setProgressEvents] = useState<InvestigationProgressEvent[]>([]);
+  const progressEventsRef = useRef<InvestigationProgressEvent[]>([]);
+  const timeZoneLabel = "UTC+7";
   const maxRangeDays = getMaxTimeRangeDays();
 
   async function submitRange() {
@@ -46,9 +38,14 @@ export default function TimeRangeForm() {
 
     setIsSubmitting(true);
     setStartedAt(Date.now());
+    progressEventsRef.current = [];
+    setProgressEvents([]);
     try {
-      const turn = await runTimeRangeInvestigation(validation.payload);
-      rememberTimeRangeInvestigation(validation.payload, turn);
+      const turn = await runTimeRangeInvestigation(validation.payload, (progressEvent) => {
+        progressEventsRef.current = [...progressEventsRef.current, progressEvent];
+        setProgressEvents(progressEventsRef.current);
+      });
+      rememberTimeRangeInvestigation(validation.payload, turn, progressEventsRef.current);
       router.push(getInvestigationHref(turn.case_id));
     } catch (error) {
       setRequestError(error);
@@ -63,7 +60,7 @@ export default function TimeRangeForm() {
   }
 
   if (isSubmitting) {
-    return <InvestigationLoader startTime={startedAt} className="mx-0 max-w-3xl" />;
+    return <InvestigationLoader events={progressEvents} startTime={startedAt} className="mx-0 max-w-3xl" />;
   }
 
   return (

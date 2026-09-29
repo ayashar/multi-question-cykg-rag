@@ -127,8 +127,10 @@ test("FR3 mock mode returns a successful deterministic report without calling th
   const repeated = createDemoTimeRangeInvestigation(range);
   assert.equal(turn.case_id, repeated.case_id);
   assert.equal(turn.error, null);
-  assert.match(turn.answer ?? "", /Demo investigation/);
-  assert.deepEqual(turn.mitre_techniques, ["T1078", "T1059"]);
+  assert.match(turn.answer ?? "", /correlated \d+ alerts/);
+  assert.equal(turn.question, "Investigate the activity described in this case. Identify related MITRE ATT&CK techniques, provide an initial diagnosis of the situation, and recommend mitigation actions.");
+  assert.ok(turn.mitre_techniques.length > 0);
+  assert.ok(turn.cited_entities.length > 0);
 });
 
 test("FR3 restores manual results after the in-memory session is lost", () => {

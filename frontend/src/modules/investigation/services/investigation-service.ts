@@ -3,6 +3,7 @@ import {
   registerCaseLookback, resolveCaseLookback, type Case, type InvestigationProgressEvent, type TimeRangeRequest, type TurnRecord,
 } from "@/api";
 import { getCases, getInvestigatedCases } from "@/modules/cases/services/cases-service";
+import { createDemoTimeRangeInvestigation as createApiDemoTimeRangeInvestigation } from "@/demo/demo-data";
 
 const selectedCases = new Map<string, Case>();
 interface PendingInvestigation {
@@ -20,6 +21,7 @@ export interface PreparedTimeRangeInvestigation {
   value: Case;
   turn: TurnRecord;
   range: TimeRangeRequest;
+  progress_events?: InvestigationProgressEvent[];
 }
 
 const preparedTimeRangeInvestigations = new Map<string, PreparedTimeRangeInvestigation>();
@@ -72,6 +74,7 @@ export function rememberInvestigationCase(value: Case): void {
 export function rememberTimeRangeInvestigation(
   range: TimeRangeRequest,
   turn: TurnRecord,
+  progressEvents?: InvestigationProgressEvent[],
 ): PreparedTimeRangeInvestigation {
   const value: Case = {
     case_id: turn.case_id,
@@ -88,7 +91,9 @@ export function rememberTimeRangeInvestigation(
     noteworthy_alert_count: 0,
     urgency_score: 0,
   };
-  const prepared = { value, turn, range };
+  const prepared: PreparedTimeRangeInvestigation = progressEvents
+    ? { value, turn, range, progress_events: progressEvents }
+    : { value, turn, range };
   preparedTimeRangeInvestigations.set(turn.case_id, prepared);
   rememberInvestigationCase(value);
   persistTimeRangeInvestigation(prepared);
@@ -126,51 +131,77 @@ export function clearTimeRangeInvestigationMemoryCache(): void {
   selectedCases.clear();
 }
 
-function demoTimeRangeCaseId(range: TimeRangeRequest): string {
-  let hash = 2_166_136_261;
-  for (const character of `${range.start}|${range.end}`) {
-    hash ^= character.charCodeAt(0);
-    hash = Math.imul(hash, 16_777_619);
-  }
-  return `demo-range-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+export function createDemoTimeRangeInvestigation(range: TimeRangeRequest): TurnRecord {
+  return createApiDemoTimeRangeInvestigation(range);
 }
 
-export function createDemoTimeRangeInvestigation(range: TimeRangeRequest): TurnRecord {
+const TIME_RANGE_AGENTS = [
+  ["guardrails", "agent.guardrails", "Guardrails Agent", ["Decision: relevant", "Investigation mode: manual time range"]],
+  ["question_generation", "agent.question_generation", "Question Generation Agent", ["Generated investigation questions for the selected time window."]],
+  ["dispatch_retrieval", "agent.dispatch_retrieval", "Retrieval Dispatcher", ["Retrieved alert, graph, and historical evidence for the selected interval."]],
+  ["review_evidence", "agent.review_evidence", "Evidence Review Agent", ["Reviewed and correlated evidence across the requested time range."]],
+  ["synthesizer", "agent.synthesizer", "Synthesis Agent", ["Built investigation findings and mitigation recommendations."]],
+  ["grounding_check", "agent.grounding_check", "Grounding Check Agent", ["Grounding check: passed."]],
+] as const;
+
+function timeRangeAgentEvent(
+  stage: (typeof TIME_RANGE_AGENTS)[number],
+  status: "running" | "complete",
+  started: number,
+): InvestigationProgressEvent {
   return {
-    case_id: demoTimeRangeCaseId(range),
-    turn_index: 1,
-    question: "Investigate this time range.",
-    answer: `Demo investigation for activity between ${range.start} and ${range.end}. The sample indicates a sequence of suspicious authentication and command-execution events that should be validated against the affected account and host.`,
-    critical_analysis: "This is frontend demonstration data. It verifies the report flow, persistence, and navigation without making a backend request.",
-    mitigation_suggestions: [
-      "Validate the sign-in activity with the account owner.",
-      "Review command execution and authentication logs for the selected period.",
-      "Isolate the affected host if the activity cannot be explained.",
-    ],
-    recommended_priority: "monitor",
-    confidence: "medium",
-    mitre_techniques: ["T1078", "T1059"],
-    cited_entities: ["demo-alert-001", "demo-host-01"],
-    error: null,
+    type: "agent",
+    status,
+    agent: stage[0],
+    agent_id: stage[1],
+    label: stage[2],
+    messages: status === "complete" ? [...stage[3]] : [],
     timestamp: new Date().toISOString(),
-    latency_seconds: 0.6,
+    elapsed_seconds: (Date.now() - started) / 1000,
   };
 }
 
-export async function runTimeRangeInvestigation(range: TimeRangeRequest): Promise<TurnRecord> {
+export async function runTimeRangeInvestigation(
+  range: TimeRangeRequest,
+  onProgress?: (event: InvestigationProgressEvent) => void,
+): Promise<TurnRecord> {
   if (process.env.NEXT_PUBLIC_USE_MOCK === "true") {
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    return createDemoTimeRangeInvestigation(range);
+    const started = Date.now();
+    for (const stage of TIME_RANGE_AGENTS) {
+      onProgress?.(timeRangeAgentEvent(stage, "running", started));
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      onProgress?.(timeRangeAgentEvent(stage, "complete", started));
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    const result = createDemoTimeRangeInvestigation(range);
+    onProgress?.({ type: "result", result, timestamp: new Date().toISOString() });
+    return result;
   }
-  return investigateTimeRange(range);
+  const started = Date.now();
+  onProgress?.(timeRangeAgentEvent(TIME_RANGE_AGENTS[0], "running", started));
+  try {
+    const result = await investigateTimeRange(range);
+    TIME_RANGE_AGENTS.forEach((stage) => onProgress?.(timeRangeAgentEvent(stage, "complete", started)));
+    onProgress?.({ type: "result", result, timestamp: new Date().toISOString() });
+    return result;
+  } catch (reason) {
+    onProgress?.({
+      type: "error",
+      message: reason instanceof Error ? reason.message : "Investigation failed.",
+      timestamp: new Date().toISOString(),
+      elapsed_seconds: (Date.now() - started) / 1000,
+    });
+    throw reason;
+  }
 }
 
 export async function rerunPreparedTimeRangeInvestigation(caseId: string): Promise<PreparedTimeRangeInvestigation> {
   const prepared = getPreparedTimeRangeInvestigation(caseId);
   if (!prepared) throw new Error("The original manual time range is no longer available.");
-  const turn = await runTimeRangeInvestigation(prepared.range);
+  const progressEvents: InvestigationProgressEvent[] = [];
+  const turn = await runTimeRangeInvestigation(prepared.range, (event) => progressEvents.push(event));
   if (turn.case_id !== caseId) throw new Error("The returned investigation belongs to a different case.");
-  return rememberTimeRangeInvestigation(prepared.range, turn);
+  return rememberTimeRangeInvestigation(prepared.range, turn, progressEvents);
 }
 
 export function getInvestigationHref(caseId: string, lookbackHours = getCaseLookback(caseId)): string {

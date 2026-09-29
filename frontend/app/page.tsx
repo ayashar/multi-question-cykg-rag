@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import DashboardOverview from "@/modules/dashboard/components/dashboard-overview";
 
 export default function Home() {
-  redirect("/cases");
+  return <DashboardOverview />;
 }

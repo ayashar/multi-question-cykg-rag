@@ -6,11 +6,11 @@ import {
   type InvestigateCaseParams,
   type TurnRecord,
 } from "./client";
-import { createDemoInvestigation, demoDelay, getDemoCase, isDemoMode } from "@/demo/demo-data";
+import { demoDelay, getDemoCase, isDemoMode, startDemoInvestigation } from "@/demo/demo-data";
 
 export async function investigateCase(input: string | InvestigateCaseParams, explicitLookback?: number): Promise<TurnRecord> {
   const caseId = typeof input === "string" ? input : input.case_id;
-  if (isDemoMode()) return demoDelay(createDemoInvestigation(getDemoCase(caseId)), 900);
+  if (isDemoMode()) return demoDelay(startDemoInvestigation(getDemoCase(caseId)), 900);
   const hours = resolveCaseLookback(caseId, typeof input === "string" ? explicitLookback : input.lookback_hours ?? explicitLookback);
   return apiRequest(`/cases/${encodeURIComponent(caseId)}/investigate`, {
     method: "POST", endpointKey: "investigateCase", isInvestigation: true, caseId,
@@ -70,7 +70,7 @@ async function streamDemoInvestigation(
     onEvent({ type: "agent", status: "complete", agent, agent_id: agentId, label, messages: demoMessages(agent, value), timestamp: new Date().toISOString(), elapsed_seconds: (Date.now() - started) / 1000 });
     await demoDelay(undefined, 250);
   }
-  const result = createDemoInvestigation(value);
+  const result = startDemoInvestigation(value);
   onEvent({ type: "result", result, timestamp: new Date().toISOString() });
   return result;
 }

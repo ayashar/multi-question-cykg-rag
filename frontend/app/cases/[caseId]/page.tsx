@@ -12,7 +12,7 @@ export default async function InvestigationPage({ params, searchParams }: {
 }) {
   const [{ caseId }, query] = await Promise.all([params, searchParams]);
   const lookbackHours = parseLookbackHours(query.lookback_hours);
-  const initialView = query.view === "graph" || query.view === "report" || query.view === "chat" ? query.view : "details";
+  const initialView = query.view === "graph" || query.view === "report" || query.view === "chat" || query.view === "log" ? query.view : "details";
   return (
     <CaseInvestigation
       key={`${caseId}:${lookbackHours}`}

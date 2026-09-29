@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowUpRight, FileText, GitMerge, LayoutGrid, LoaderCircle } from "lucide-react";
-import { ApiClientError, resolveCaseLookback, type Case, type InvestigationProgressEvent, type TurnRecord } from "@/api";
+import { ArrowLeft, ArrowUpRight, FileText, GitMerge, LayoutGrid, LoaderCircle, MessageSquare, ScrollText } from "lucide-react";
+import { ApiClientError, resolveCaseLookback, sendChatMessage, type Case, type InvestigationProgressEvent, type TurnRecord } from "@/api";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { ApiErrorView, CaseNotFoundError, TurnResult } from "@/components/ui/error-states";
 import { InvestigationLoader, InvestigationLog } from "@/components/ui/investigation-loader";
-import { isManualInvestigatedCase, recordInvestigatedCase } from "@/modules/cases/services/cases-service";
+import { getInvestigatedCase, isManualInvestigatedCase, recordInvestigatedCase } from "@/modules/cases/services/cases-service";
 import { cn } from "@/lib/utils";
 import {
   getInvestigationHref,
@@ -21,12 +22,13 @@ import InvestigationReport from "./investigation-report";
 import AttackGraphPreview from "./attack-graph-preview";
 import InvestigationChatroom from "./investigation-chatroom";
 
-type View = "details" | "report" | "graph" | "chat";
+type View = "details" | "report" | "graph" | "chat" | "log";
 const views = [
   { id: "details", label: "Details", icon: LayoutGrid },
   { id: "report", label: "Report", icon: FileText },
   { id: "graph", label: "Attack Graph", icon: GitMerge },
   { id: "chat", label: "Chatbot", icon: MessageSquare },
+  { id: "log", label: "Log", icon: ScrollText },
 ] as const;
 
 export default function CaseInvestigation({
@@ -50,7 +52,8 @@ export default function CaseInvestigation({
   const [startTime, setStartTime] = useState<number>();
   const [attempt, setAttempt] = useState(0);
   const [progressEvents, setProgressEvents] = useState<InvestigationProgressEvent[]>([]);
-  const [view, setView] = useState<View>("details");
+  const progressEventsRef = useRef<InvestigationProgressEvent[]>([]);
+  const [view, setView] = useState<View>(initialView);
   const [isManualTimeRange, setIsManualTimeRange] = useState(false);
   const content = useRef<HTMLDivElement>(null);
   const scrollPositions = useRef<Partial<Record<View, number>>>({});
@@ -69,6 +72,8 @@ export default function CaseInvestigation({
           if (saved?.turn?.case_id === caseId && saved.turn.error === null) {
             setValue(saved.case);
             setTurn(saved.turn);
+            progressEventsRef.current = saved.progress_events ?? [];
+            setProgressEvents(progressEventsRef.current);
             setIsManualTimeRange(saved.source === "manual-time-range");
             setIsLoading(false);
             return;
@@ -84,14 +89,20 @@ export default function CaseInvestigation({
         if (cancelled) return;
         setValue(selected);
         setIsManualTimeRange(Boolean(prepared));
-        if (prepared) setView("report");
+        if (prepared?.progress_events) {
+          progressEventsRef.current = prepared.progress_events;
+          setProgressEvents(prepared.progress_events);
+        }
         setStartTime(Date.now());
         const result = prepared
           ? attempt === 0
             ? prepared.turn
             : (await rerunPreparedTimeRangeInvestigation(caseId)).turn
           : await runCaseInvestigation(selected, lookbackHours, (event) => {
-              if (!cancelled) setProgressEvents((current) => [...current, event]);
+              if (!cancelled) {
+                progressEventsRef.current = [...progressEventsRef.current, event];
+                setProgressEvents(progressEventsRef.current);
+              }
             });
         if (cancelled) return;
         if (result.case_id !== caseId) throw new Error("The returned investigation belongs to a different case.");
@@ -102,6 +113,7 @@ export default function CaseInvestigation({
             prepared ? undefined : resolveCaseLookback(caseId, lookbackHours) ?? 336,
             prepared ? "manual-time-range" : "case-list",
             result,
+            progressEventsRef.current,
           );
         }
       } catch (reason) {
@@ -122,8 +134,9 @@ export default function CaseInvestigation({
       isManualTimeRange ? undefined : resolveCaseLookback(caseId, lookbackHours) ?? 336,
       isManualTimeRange ? "manual-time-range" : "case-list",
       turn,
+      progressEvents,
     );
-  }, [caseId, isManualTimeRange, lookbackHours, turn, value]);
+  }, [caseId, isManualTimeRange, lookbackHours, progressEvents, turn, value]);
 
   const retry = () => {
     setTurn(null);
@@ -131,6 +144,7 @@ export default function CaseInvestigation({
     setView(initialView);
     setStartTime(Date.now());
     setProgressEvents([]);
+    progressEventsRef.current = [];
     setIsLoading(true);
     setAttempt((previous) => previous + 1);
   };
@@ -214,25 +228,26 @@ export default function CaseInvestigation({
         {!isLoading && view === "details" && value && <CaseDetails value={value} manualTimeRange={isManualTimeRange} />}
         {!isLoading && turn && value && <TurnResult turn={turn} onRetry={retry}>
           {view === "report" && <InvestigationReport value={value} turn={turn} />}
-          {view === "details" && <div className="grid items-start gap-3 lg:grid-cols-2">
-            <section className="space-y-4 rounded-[10px] bg-primary-100 p-5">
-              <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-h6">Investigation findings</h2>
-                <Button type="button" onClick={() => showView("report")} className="bg-primary-600 text-white hover:bg-primary-700">View report<ArrowUpRight aria-hidden="true" className="size-4" /></Button>
+          {view === "details" && <div className="grid items-stretch gap-3 lg:grid-cols-2">
+            <section className="flex h-full flex-col gap-4 rounded-[10px] bg-primary-100 p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-h6">Chatbot</h2>
+                <Button type="button" onClick={() => showView("chat")} className="shrink-0 whitespace-nowrap bg-primary-600 text-white hover:bg-primary-700">Chat More<ArrowUpRight aria-hidden="true" className="size-4" /></Button>
               </div>
-              <div className="space-y-2 rounded-[4px] border-l-3 border-green-500 bg-green-400 p-4 text-white">
-                <h3 className="font-b1 font-medium">AI Summary</h3>
-                <p className="font-b2 whitespace-pre-wrap line-clamp-6 wrap-anywhere">{turn.answer || "The investigation returned no narrative. Open the report to review available findings."}</p>
+              <div className="flex min-h-[284px] flex-1 flex-col gap-3 overflow-hidden rounded-[2px] bg-primary-300 p-3">
+                <article className="max-w-[92%] space-y-2 rounded-[4px] border-l-3 border-green-500 bg-green-400 p-3 text-white">
+                  <h3 className="font-b1 font-medium">AI Summary</h3>
+                  <p className="font-b2 line-clamp-5 whitespace-pre-wrap wrap-anywhere">{turn.answer || "The investigation returned no narrative. Open the chatbot to review this case."}</p>
+                </article>
+                {turn.critical_analysis && <article className="max-w-[86%] rounded-[4px] border-l-3 border-neutral-900 bg-neutral-800 p-3 text-neutral-200">
+                  <p className="font-b2 line-clamp-3 whitespace-pre-wrap wrap-anywhere">{turn.critical_analysis}</p>
+                </article>}
               </div>
-              <dl className="flex flex-wrap gap-x-8 gap-y-3 font-b2">
-                <div><dt>Priority</dt><dd className="font-semibold capitalize">{turn.recommended_priority ?? "Not provided"}</dd></div>
-                <div><dt>Confidence</dt><dd className="font-semibold capitalize">{turn.confidence ?? "Not provided"}</dd></div>
-              </dl>
             </section>
-            <section className="space-y-4 rounded-[10px] bg-primary-100 p-5">
+            <section className="flex h-full flex-col gap-4 rounded-[10px] bg-primary-100 p-5">
               <div className="flex items-center justify-between gap-3"><h2 className="font-h6">Attack Graph</h2>
-                <Button type="button" disabled={isManualTimeRange} onClick={() => showView("graph")} className="bg-primary-600 text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-55">See more<ArrowUpRight aria-hidden="true" className="size-4" /></Button>
+                <Button type="button" disabled={isManualTimeRange} onClick={() => showView("graph")} className="shrink-0 whitespace-nowrap bg-primary-600 text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-55">See more<ArrowUpRight aria-hidden="true" className="size-4" /></Button>
               </div>
-              <div className="rounded-[4px] bg-background p-3"><AttackGraphPreview caseId={caseId} lookbackHours={lookbackHours} manualTimeRange={isManualTimeRange} /></div>
+              <div className="flex min-h-[284px] flex-1 flex-col rounded-[4px] bg-background p-3"><AttackGraphPreview caseId={caseId} lookbackHours={lookbackHours} manualTimeRange={isManualTimeRange} /></div>
             </section>
           </div>}
           {view === "graph" && <section aria-labelledby="attack-graph-title" className="space-y-5">
@@ -243,10 +258,15 @@ export default function CaseInvestigation({
             <AttackGraphPreview caseId={caseId} lookbackHours={lookbackHours} manualTimeRange={isManualTimeRange} expanded />
           </section>}
           <div className={view === "chat" ? undefined : "hidden"}>
-            <InvestigationChatroom caseId={caseId} value={value} initialTurns={[turn]} />
+            <InvestigationChatroom
+              caseId={caseId}
+              value={value}
+              initialTurns={[turn]}
+              onSendQuestion={(question) => sendChatMessage(caseId, question)}
+            />
           </div>
+          {view === "log" && <InvestigationLog events={progressEvents} />}
         </TurnResult>}
-        {!isLoading && view === "details" && <InvestigationLog events={progressEvents} />}
       </div>
     </div>
   );
