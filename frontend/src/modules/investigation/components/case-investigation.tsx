@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowUpRight, FileText, GitMerge, LayoutGrid, LoaderCircle, MessageSquare, ScrollText } from "lucide-react";
-import { ApiClientError, resolveCaseLookback, type Case, type InvestigationProgressEvent, type TurnRecord } from "@/api";
+import { ApiClientError, resolveCaseLookback, sendChatMessage, type Case, type InvestigationProgressEvent, type TurnRecord } from "@/api";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { ApiErrorView, CaseNotFoundError, TurnResult } from "@/components/ui/error-states";
 import { InvestigationLoader, InvestigationLog } from "@/components/ui/investigation-loader";
@@ -89,7 +89,10 @@ export default function CaseInvestigation({
         if (cancelled) return;
         setValue(selected);
         setIsManualTimeRange(Boolean(prepared));
-        if (prepared) setView("report");
+        if (prepared?.progress_events) {
+          progressEventsRef.current = prepared.progress_events;
+          setProgressEvents(prepared.progress_events);
+        }
         setStartTime(Date.now());
         const result = prepared
           ? attempt === 0
@@ -255,7 +258,12 @@ export default function CaseInvestigation({
             <AttackGraphPreview caseId={caseId} lookbackHours={lookbackHours} manualTimeRange={isManualTimeRange} expanded />
           </section>}
           <div className={view === "chat" ? undefined : "hidden"}>
-            <InvestigationChatroom caseId={caseId} value={value} initialTurns={[turn]} />
+            <InvestigationChatroom
+              caseId={caseId}
+              value={value}
+              initialTurns={[turn]}
+              onSendQuestion={(question) => sendChatMessage(caseId, question)}
+            />
           </div>
           {view === "log" && <InvestigationLog events={progressEvents} />}
         </TurnResult>}

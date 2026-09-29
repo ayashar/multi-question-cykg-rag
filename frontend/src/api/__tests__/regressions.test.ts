@@ -1,6 +1,7 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import {
+  excludeInvestigatedCases,
   getCases as getScreenCases,
   hoursCoveringTimestamp,
   resolveLookbackHours,
@@ -168,4 +169,19 @@ test("case service preserves backend urgency order", async () => {
   globalThis.fetch = async () => Response.json([low, high]);
   const cases = await getScreenCases(24);
   assert.deepEqual(cases.map((item) => item.case_id), ["low", "high"]);
+});
+
+test("case queues exclude cases that already have investigation history", () => {
+  const fresh = { ...exampleCase, case_id: "fresh" };
+  const investigated = { ...exampleCase, case_id: "investigated" };
+
+  const result = excludeInvestigatedCases([fresh, investigated], [{
+    case_id: investigated.case_id,
+    investigated_at: "2026-09-29T00:00:00Z",
+    case: investigated,
+    lookback_hours: 24,
+    source: "case-list",
+  }]);
+
+  assert.deepEqual(result.map((item) => item.case_id), [fresh.case_id]);
 });

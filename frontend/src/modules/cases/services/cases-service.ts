@@ -3,7 +3,7 @@ import { type Case, type InvestigatedCaseRecord, type LookbackPreset, LOOKBACK_H
 import { MOCK_CASES } from "../data/cases-fixture";
 import { getCases as fetchCases, getIngestionStatus, registerCasesLookback, getCaseLookback } from "@/api";
 
-const INVESTIGATED_CASES_STORAGE_KEY = "kgcs_investigated_cases";
+export const INVESTIGATED_CASES_STORAGE_KEY = "kgcs_investigated_cases_v2";
 
 /**
  * Stores the lookback_hours used when each case_id first surfaced.
@@ -13,12 +13,21 @@ export { registerCasesLookback as persistLookbackForCases } from "@/api";
 
 export { getCaseLookback as getLookbackForCase } from "@/api";
 
+export function parseInvestigatedCases(raw: string | null | undefined): InvestigatedCaseRecord[] {
+  try {
+    const records: unknown = JSON.parse(raw || "[]");
+    return Array.isArray(records)
+      ? records.filter((record) => record?.case_id && record?.case?.case_id === record.case_id)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 export function getInvestigatedCases(): InvestigatedCaseRecord[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(INVESTIGATED_CASES_STORAGE_KEY) || "[]";
-    const records: unknown = JSON.parse(raw);
-    return Array.isArray(records) ? records.filter((record) => record?.case_id && record?.case?.case_id === record.case_id) : [];
+    return parseInvestigatedCases(localStorage.getItem(INVESTIGATED_CASES_STORAGE_KEY));
   } catch {
     return [];
   }
@@ -26,6 +35,14 @@ export function getInvestigatedCases(): InvestigatedCaseRecord[] {
 
 export function getInvestigatedCase(caseId: string): InvestigatedCaseRecord | undefined {
   return getInvestigatedCases().find((record) => record.case_id === caseId);
+}
+
+export function excludeInvestigatedCases(
+  cases: Case[],
+  investigatedCases: InvestigatedCaseRecord[] = getInvestigatedCases(),
+): Case[] {
+  const investigatedIds = new Set(investigatedCases.map((record) => record.case_id));
+  return cases.filter((item) => !investigatedIds.has(item.case_id));
 }
 
 export function recordInvestigatedCase(

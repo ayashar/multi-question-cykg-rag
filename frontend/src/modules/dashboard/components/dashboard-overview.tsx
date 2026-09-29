@@ -2,11 +2,16 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useSyncExternalStore } from "react";
-import { ArrowUpRight, ChevronRight, Search } from "lucide-react";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { ArrowUpRight, ChevronRight, MessageSquare, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { InvestigationLoader } from "@/components/ui/investigation-loader";
 import { useCases } from "@/modules/cases/hooks/use-cases";
-import { getInvestigatedCases } from "@/modules/cases/services/cases-service";
+import {
+  excludeInvestigatedCases,
+  INVESTIGATED_CASES_STORAGE_KEY,
+  parseInvestigatedCases,
+} from "@/modules/cases/services/cases-service";
 import { MOCK_CASES } from "@/modules/cases/data/cases-fixture";
 import { getUrgencyStripeColor } from "@/modules/cases/components/urgency-indicator";
 import type { Case, InvestigatedCaseRecord } from "@/modules/cases/types";
@@ -18,6 +23,7 @@ import {
   runTimeRangeInvestigation,
 } from "@/modules/investigation/services/investigation-service";
 import { validateTimeRange } from "@/modules/investigation/services/time-range-validation";
+import type { InvestigationProgressEvent } from "@/api";
 
 const historySubscribe = (callback: () => void) => {
   window.addEventListener("storage", callback);
@@ -30,7 +36,7 @@ const historySubscribe = (callback: () => void) => {
 
 const historySnapshot = () => {
   try {
-    return localStorage.getItem("kgcs_investigated_cases") ?? "[]";
+    return localStorage.getItem(INVESTIGATED_CASES_STORAGE_KEY) ?? "[]";
   } catch {
     return "[]";
   }
@@ -54,10 +60,19 @@ function DashboardLink({ href, children }: { href: string; children: React.React
   );
 }
 
-function PastInvestigationRows({ records, fallback }: { records: InvestigatedCaseRecord[]; fallback: Case[] }) {
-  const rows = records.length > 0
-    ? records.slice(0, 4).map((record) => ({ case: record.case, record }))
-    : fallback.slice(0, 4).map((value) => ({ case: value, record: undefined }));
+function PastInvestigationRows({ records }: { records: InvestigatedCaseRecord[] }) {
+  if (records.length === 0) {
+    return (
+      <div className="flex min-h-[240px] items-center justify-center rounded-[3px] border border-dashed border-primary-300 bg-background/35 p-6 text-center">
+        <div>
+          <p className="font-semibold text-primary-1000">No past investigations yet</p>
+          <p className="mt-1 text-sm text-primary-800">Investigate a case to add it to your history.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const rows = records.slice(0, 4).map((record) => ({ case: record.case, record }));
 
   return (
     <div className="overflow-hidden rounded-[2px]">
@@ -70,9 +85,7 @@ function PastInvestigationRows({ records, fallback }: { records: InvestigatedCas
       <div className="divide-y divide-primary-100 bg-primary-300/70">
         {rows.map(({ case: value, record }) => {
           const entity = displayHost(value);
-          const href = record
-            ? getPastInvestigationHref(value.case_id, record.lookback_hours)
-            : getInvestigationHref(value.case_id);
+          const href = getPastInvestigationHref(value.case_id, record.lookback_hours);
           return (
             <Link
               key={value.case_id}
@@ -104,6 +117,17 @@ function CaseQueue({ cases, isLoading }: { cases: Case[]; isLoading: boolean }) 
         {Array.from({ length: 5 }, (_, index) => (
           <div key={index} className="h-[61px] animate-pulse bg-primary-300/50" />
         ))}
+      </div>
+    );
+  }
+
+  if (cases.length === 0) {
+    return (
+      <div className="flex min-h-[170px] items-center justify-center rounded-[3px] border border-dashed border-primary-300 bg-background/35 p-5 text-center">
+        <div>
+          <p className="font-semibold text-primary-1000">No uninvestigated cases</p>
+          <p className="mt-1 text-sm text-primary-800">Completed cases are available in Past Investigation.</p>
+        </div>
       </div>
     );
   }
@@ -147,23 +171,19 @@ export default function DashboardOverview() {
   const router = useRouter();
   const { cases, isLoading, error } = useCases("24h", 5);
   const storedHistory = useSyncExternalStore(historySubscribe, historySnapshot, () => "[]");
-  const history = useMemo(() => {
-    void storedHistory;
-    return getInvestigatedCases();
-  }, [storedHistory]);
-  const displayCases = cases.length > 0 ? cases : MOCK_CASES.slice(0, 5);
-  const latestRecord = history.find((record) => record.turn);
-  const latestCase = latestRecord?.case ?? displayCases[0] ?? MOCK_CASES[0];
-  const latestCaseHref = latestRecord
-    ? getPastInvestigationHref(latestCase.case_id, latestRecord.lookback_hours)
-    : getInvestigationHref(latestCase.case_id);
-  const latestChatHref = `${latestCaseHref}${latestCaseHref.includes("?") ? "&" : "?"}view=chat`;
-  const latestAnswer = latestRecord?.turn?.answer
-    ?? "The alert establishes that suspicious network activity was detected. Review the related evidence before deciding whether containment is required.";
+  const history = useMemo(() => parseInvestigatedCases(storedHistory), [storedHistory]);
+  const fallbackCases = excludeInvestigatedCases(MOCK_CASES, history);
+  const displayCases = cases.length > 0 ? cases : error ? fallbackCases.slice(0, 5) : [];
+  const recentChats = history
+    .filter((record) => record.turn?.error === null && record.turn.answer?.trim())
+    .slice(0, 4);
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [rangeError, setRangeError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [rangeProgressEvents, setRangeProgressEvents] = useState<InvestigationProgressEvent[]>([]);
+  const rangeProgressRef = useRef<InvestigationProgressEvent[]>([]);
+  const [rangeStartedAt, setRangeStartedAt] = useState<number>();
 
   async function handleTimeRangeSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -176,9 +196,15 @@ export default function DashboardOverview() {
     if (!validation.payload) return;
 
     setIsSubmitting(true);
+    setRangeStartedAt(Date.now());
+    rangeProgressRef.current = [];
+    setRangeProgressEvents([]);
     try {
-      const turn = await runTimeRangeInvestigation(validation.payload);
-      rememberTimeRangeInvestigation(validation.payload, turn);
+      const turn = await runTimeRangeInvestigation(validation.payload, (progressEvent) => {
+        rangeProgressRef.current = [...rangeProgressRef.current, progressEvent];
+        setRangeProgressEvents(rangeProgressRef.current);
+      });
+      rememberTimeRangeInvestigation(validation.payload, turn, rangeProgressRef.current);
       router.push(getInvestigationHref(turn.case_id));
     } catch (requestError) {
       setRangeError(requestError instanceof Error ? requestError.message : "Unable to start the investigation.");
@@ -201,29 +227,50 @@ export default function DashboardOverview() {
             <h2 id="past-investigation-title" className="text-2xl font-bold text-black-600">Past Investigation</h2>
             <DashboardLink href="/past-investigation">See More</DashboardLink>
           </div>
-          <PastInvestigationRows records={history} fallback={displayCases} />
+          <PastInvestigationRows records={history} />
         </section>
 
         <section className="rounded-[10px] bg-primary-100 p-5 xl:col-start-1 xl:row-start-2" aria-labelledby="latest-chat-title">
           <div className="mb-3 flex items-center gap-3">
-            <h2 id="latest-chat-title" className="text-2xl font-bold text-black-600">Latest Chat</h2>
+            <h2 id="latest-chat-title" className="text-2xl font-bold text-black-600">Latest Chats</h2>
           </div>
-          <div className="rounded-[2px] bg-primary-300/45 p-3">
-            <div className="max-w-[90%] rounded-[3px] border-l-4 border-primary-800 bg-green-400 px-3 py-3 text-white shadow-sm">
-              <div className="mb-2 flex items-center justify-between gap-3 text-[11px] text-green-100">
-                <span className="truncate font-mono">{latestCase?.case_id ?? "No case selected"}</span>
-                <Link
-                  href={latestChatHref}
-                  onClick={() => rememberInvestigationCase(latestCase)}
-                  aria-label={`Continue chat for ${latestCase.case_id}`}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-sm font-medium underline-offset-2 transition hover:text-white hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-                >
-                  continue <ChevronRight className="size-3.5" aria-hidden="true" />
-                </Link>
-              </div>
-              <p className="line-clamp-3 text-sm leading-relaxed sm:text-base">{latestAnswer}</p>
+          {recentChats.length > 0 ? (
+            <div className="max-h-[320px] space-y-2 overflow-y-auto rounded-[2px] bg-primary-300/45 p-3" role="list" aria-label="Recent investigation chats">
+              {recentChats.map((record) => {
+                const investigationHref = getPastInvestigationHref(record.case_id, record.lookback_hours);
+                const chatHref = `${investigationHref}${investigationHref.includes("?") ? "&" : "?"}view=chat`;
+
+                return (
+                  <article
+                    key={record.case_id}
+                    role="listitem"
+                    className="rounded-[3px] border-l-4 border-primary-800 bg-green-400 px-3 py-3 text-white shadow-sm"
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-3 text-[11px] text-green-100">
+                      <span className="truncate font-mono">{record.case_id}</span>
+                      <Link
+                        href={chatHref}
+                        onClick={() => rememberInvestigationCase(record.case)}
+                        aria-label={`Continue chat for ${record.case_id}`}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-sm font-medium underline-offset-2 transition hover:text-white hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                      >
+                        continue <ChevronRight className="size-3.5" aria-hidden="true" />
+                      </Link>
+                    </div>
+                    <p className="line-clamp-3 text-sm leading-relaxed sm:text-base">{record.turn?.answer}</p>
+                  </article>
+                );
+              })}
             </div>
-          </div>
+          ) : (
+            <div className="flex min-h-[130px] items-center justify-center rounded-[3px] border border-dashed border-primary-300 bg-background/35 p-5 text-center">
+              <div>
+                <MessageSquare className="mx-auto size-6 text-primary-600" aria-hidden="true" />
+                <p className="mt-2 font-semibold text-primary-1000">No conversations yet</p>
+                <p className="mt-1 text-sm text-primary-800">Chats from investigated cases will appear here.</p>
+              </div>
+            </div>
+          )}
         </section>
 
         <section className="rounded-[10px] bg-primary-100 p-5 xl:col-start-2 xl:row-span-2 xl:row-start-1" aria-labelledby="start-investigating-title">
@@ -258,17 +305,21 @@ export default function DashboardOverview() {
             {rangeError && <p role="alert" className="mt-2 text-xs font-semibold text-red-400">{rangeError}</p>}
           </form>
 
-          <div className="mb-3 mt-7 flex items-center justify-between gap-3">
-            <h3 className="text-lg font-medium leading-tight text-black-600">Or investigate from case listed</h3>
-            <DashboardLink href="/cases">See More</DashboardLink>
-          </div>
+          {isSubmitting ? (
+            <InvestigationLoader events={rangeProgressEvents} startTime={rangeStartedAt} className="mt-5" />
+          ) : <>
+            <div className="mb-3 mt-7 flex items-center justify-between gap-3">
+              <h3 className="text-lg font-medium leading-tight text-black-600">Or investigate from case listed</h3>
+              <DashboardLink href="/cases">See More</DashboardLink>
+            </div>
 
-          {error && cases.length === 0 && (
-            <p className="mb-2 rounded-[3px] bg-red-100 px-3 py-2 text-xs text-red-500">
-              Live cases are unavailable, so sample cases are shown.
-            </p>
-          )}
-          <CaseQueue cases={displayCases} isLoading={isLoading && cases.length === 0} />
+            {error && cases.length === 0 && (
+              <p className="mb-2 rounded-[3px] bg-red-100 px-3 py-2 text-xs text-red-500">
+                Live cases are unavailable, so sample cases are shown.
+              </p>
+            )}
+            <CaseQueue cases={displayCases} isLoading={isLoading && cases.length === 0} />
+          </>}
         </section>
       </div>
     </div>
