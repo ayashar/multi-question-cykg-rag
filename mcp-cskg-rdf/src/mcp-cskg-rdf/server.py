@@ -51,8 +51,9 @@ socket.setdefaulttimeout(30)
 try:
     import truststore
     truststore.inject_into_ssl()
+    HAS_TRUSTSTORE = True
 except ImportError:
-    pass
+    HAS_TRUSTSTORE = False  # reported once logging is configured, below
 
 import rdflib
 from openai import OpenAI
@@ -84,6 +85,23 @@ parser.add_argument("--sparql-endpoint", default="", help="SPARQL endpoint URL (
 args = parser.parse_args()
 
 logger.info("Starting MITRE ATT&CK SPARQL MCP Server v1.0.0")
+if not HAS_TRUSTSTORE:
+    # Previously skipped in silence. Without it this process verifies HTTPS
+    # against Python's default CA store, which the SEPSES endpoint is known
+    # to fail on some builds -- and rdflib then reports that as a malformed
+    # query (see _describe_error below).
+    logger.warning("truststore is not installed: HTTPS certificates are verified against Python's default CA "
+                   "store instead of the operating system's trust store. Install it (it is listed in "
+                   "mcp-cskg-rdf/requirements.txt) if the SPARQL endpoint fails certificate verification.")
+
+
+def _describe_error(exc: BaseException) -> str:
+    """rdflib's SPARQLConnector turns ANY failure to reach the endpoint --
+    DNS, timeout, TLS verification -- into ValueError("You did something
+    wrong formulating either the URI or your SPARQL query"). The real
+    error survives only as the exception's context; include it."""
+    cause = exc.__cause__ or exc.__context__
+    return f"{exc}" + (f" (underlying error: {type(cause).__name__}: {cause})" if cause else "")
 
 # Define namespaces
 ATTACK = rdflib.Namespace("http://w3id.org/sepses/vocab/ref/attack#")
@@ -124,7 +142,7 @@ async def attack_triplestore_lifespan(server: FastMCP, rdf_file: str, sparql_end
             graph.query("SELECT ?s WHERE { ?s ?p ?o } LIMIT 1")
             logger.info(f"Successfully connected to {sparql_endpoint}")
         except Exception as e:
-            logger.error(f"Failed to connect to SPARQL endpoint: {str(e)}")
+            logger.error(f"Failed to connect to SPARQL endpoint: {_describe_error(e)}")
             raise
     else:
         graph = rdflib.Graph()
@@ -262,8 +280,8 @@ def execute_sparql_query(query: str, ctx: Context, include_description: bool = F
         logger.info(query)
         return format_sparql_results(results, include_description)
     except Exception as e:
-        logger.error(f"SPARQL query error: {str(e)}")
-        return f"Error executing SPARQL query: {str(e)}"
+        logger.error(f"SPARQL query error: {_describe_error(e)}")
+        return f"Error executing SPARQL query: {_describe_error(e)}"
 
 @mcp.tool()
 def get_server_mode(ctx: Context) -> str:

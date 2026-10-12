@@ -20,5 +20,6 @@ dependencies = [
     "python-dotenv>=1.1.1",
     "rdflib>=7.1.4",
     "sentence-transformers>=5.0.0",
+    "truststore>=0.10.4",
     "uvicorn[standard]>=0.35.0",
 ]

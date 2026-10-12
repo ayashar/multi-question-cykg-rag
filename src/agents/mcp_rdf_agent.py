@@ -16,9 +16,11 @@ run_mcp_agent() instead -- a hang there now only affects the one CSKG
 question that triggers it (already wrapped in NODE_CALL_TIMEOUT_SECONDS by
 src/graph/workflow.py's dispatch_retrieval_node), not process startup.
 """
+import asyncio
 import os
 import logging
-from pathlib import Path
+import time
+from src.agents.cskg_health import CskgDependencyError, load_server_config, run_checks_async
 from src.config.settings import llm
 
 logger = logging.getLogger(__name__)
@@ -28,13 +30,17 @@ logger = logging.getLogger(__name__)
 _mcp_client = None
 
 def get_mcp_client():
-    """Inisialisasi dan mengembalikan MCPClient (hanya sekali)."""
+    """Inisialisasi dan mengembalikan MCPClient (hanya sekali).
+
+    The server definition comes from cskg_health.load_server_config(), not
+    straight from the file: that resolves ${CURRENT_PYTHON}/${PROJECT_ROOT}
+    (and a CSKG_PYTHON override) so browser_mcp.json no longer hard-codes
+    one machine's virtualenv -- the pilot's CSKG failure was exactly a
+    hard-coded interpreter whose environment had been offloaded. It is the
+    same definition the independent health check launches."""
     global _mcp_client
     if _mcp_client is None:
-        project_root = Path(__file__).parent.parent.parent
-        config_path = project_root / "browser_mcp.json"
-        if not config_path.exists():
-            raise FileNotFoundError(f"MCP config file not found at {config_path}")
+        config = load_server_config()
         # Must be set before `import mcp_use` -- its observability
         # submodules read these via os.getenv at their own import time
         # (see module docstring above), not lazily.
@@ -42,8 +48,41 @@ def get_mcp_client():
         os.environ.setdefault("MCP_USE_LAMINAR", "false")
         os.environ.setdefault("MCP_USE_LANGFUSE", "false")
         from mcp_use import MCPClient
-        _mcp_client = MCPClient.from_config_file(str(config_path))
+        _mcp_client = MCPClient.from_dict(config)
     return _mcp_client
+
+
+# --- Readiness: fail fast, and say why ---
+# Before the first CSKG question in a process (and again after a failure,
+# once the cool-down passes) the server is probed with the independent
+# check in cskg_health.py. A broken dependency then surfaces within one
+# retrieval deadline as a CskgDependencyError naming the failing stage,
+# instead of each question waiting out a 60 s timeout and reporting ''.
+READINESS_FAILURE_TTL_SECONDS = float(os.environ.get("CSKG_READINESS_RETRY_SECONDS", "120"))
+_readiness = {"report": None, "at": 0.0}
+_readiness_locks: dict = {}
+
+
+async def ensure_cskg_ready() -> dict:
+    loop = asyncio.get_running_loop()
+    lock = _readiness_locks.setdefault(id(loop), asyncio.Lock())
+    async with lock:
+        report = _readiness["report"]
+        fresh = report is not None and (
+            report["status"] == "ok" or time.monotonic() - _readiness["at"] < READINESS_FAILURE_TTL_SECONDS)
+        if not fresh:
+            report = await run_checks_async(deep=False)
+            _readiness.update(report=report, at=time.monotonic())
+            log = logger.info if report["status"] == "ok" else logger.error
+            log(f"[cskg readiness] {report['summary']}")
+    if report["status"] != "ok":
+        raise CskgDependencyError(report["summary"], stage=report.get("failed_stage"), report=report)
+    return report
+
+
+def last_readiness_report():
+    """Most recent readiness probe result for this process, or None."""
+    return _readiness["report"]
 
 # Exact marker MAX_STEPS-exhausted/nothing-found responses must start
 # with -- src/graph/workflow.py::_context_richness matches on this (plus a
@@ -108,6 +147,7 @@ async def run_mcp_agent(question: str) -> str:
     through undetected). This is a structural ground-truth signal instead of
     inferring intent from natural language.
     """
+    await ensure_cskg_ready()  # raises CskgDependencyError with the failing stage
     try:
         client = get_mcp_client()  # imports mcp_use as a side effect -- see module docstring
         from mcp_use import MCPAgent
@@ -128,7 +168,20 @@ async def run_mcp_agent(question: str) -> str:
                 f"(steps={steps_taken}) -- this is not a real knowledge-graph lookup, whatever the "
                 f"response text claims"
             )
+            if not str(result).startswith(NO_DATA_MARKER):
+                # Fluent prose with zero tool calls came from the model's
+                # own memory, not from the knowledge graph. It must not
+                # reach the synthesizer as if it were CSKG evidence.
+                return (f"{NO_DATA_MARKER}: the knowledge-base agent produced an answer without calling "
+                        f"any knowledge-graph tool, so that answer was discarded as ungrounded.")
         return result
+    except CskgDependencyError:
+        raise
     except Exception as e:
-        logger.error(f"An error occurred while running the MCP Agent: {e}")
-        return f"Error during MCP agent execution: {e}"
+        # Previously returned as an ordinary answer string ("Error during
+        # MCP agent execution: ..."), which made a broken dependency look
+        # like a retrieved result. Raised instead, so the dispatcher
+        # records it as a dependency failure with its type and message.
+        logger.error(f"An error occurred while running the MCP Agent: {type(e).__name__}: {e}")
+        raise CskgDependencyError(
+            f"CSKG agent run failed: {type(e).__name__}: {e or 'no message'}", stage="agent_run") from e

@@ -26,6 +26,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 from src.config.settings import llm
+from src.config.structured import structured_model
 
 
 class GuardrailsOutput(BaseModel):
@@ -108,7 +109,7 @@ guardrails_prompt = ChatPromptTemplate.from_messages([
     ),
 ])
 
-guardrails_chain = guardrails_prompt | llm.with_structured_output(GuardrailsOutput)
+guardrails_chain = guardrails_prompt | structured_model(llm, GuardrailsOutput)
 
 
 def _render_alert_context(alert: Optional[dict]) -> str:

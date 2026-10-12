@@ -69,6 +69,27 @@ def _entities(alert: Alert) -> Set[str]:
     return ent
 
 
+def attack_chain_summary(alerts: List[Alert]) -> tuple[Optional[str], List[str]]:
+    """Same reachable-successor ranking as build_attack_graph, without dense edges.
+
+    Each entity's bitset contains later alerts reachable through that entity.
+    Processing backwards also includes paths that switch shared entities.
+    """
+    ordered = sorted(alerts, key=lambda a: a.timestamp)
+    suffix: Dict[str, int] = {}
+    counts = [0] * len(ordered)
+    for i in range(len(ordered) - 1, -1, -1):
+        entities = _entities(ordered[i])
+        reachable = 0
+        for entity in entities:
+            reachable |= suffix.get(entity, 0)
+        counts[i] = reachable.bit_count()
+        for entity in entities:
+            suffix[entity] = suffix.get(entity, 0) | reachable | (1 << i)
+    root = ordered[max(range(len(ordered)), key=lambda i: counts[i])].id if ordered else None
+    return root, [a.id for a in ordered]
+
+
 def build_attack_graph(case: Case, alerts: List[Alert]) -> CaseAttackGraph:
     nodes: Dict[str, AttackGraphNode] = {}
     edges: List[AttackGraphEdge] = []

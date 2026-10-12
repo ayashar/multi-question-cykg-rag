@@ -93,3 +93,30 @@ class AgentState(TypedDict):
     # turns, which skip question_generation entirely and reuse whatever's
     # already cached.
     known_mitre_techniques: Optional[List[str]]
+
+    # --- config v3: case scope, evidence provenance, explicit failures ---
+
+    # Which alerts constitute the case under investigation, and the
+    # knowledge cutoff for everything else (src/retrieval/case_scope.py::
+    # make_case_scope): {case_id, alert_ids, first_seen, last_seen, hosts,
+    # reference_time}. Set on turn 1 by src/investigation/session.py (and
+    # eval/case_eval_runtime.py); persists across checkpointed turns like
+    # case_context. When present, Cypher/vector retrieval is restricted to
+    # these alerts BEFORE any row limit, and everything else is returned
+    # in a separate, labelled historical channel. None outside the
+    # investigation flow -- retrieval is then unscoped, as before.
+    case_scope: Optional[dict]
+
+    # {alert_id: {scope: 'case'|'historical', text, timestamp, host,
+    # time_relation, sources}} for every alert whose content the model has
+    # been shown in this investigation (derived from question_results plus
+    # the case fact sheet's excerpts). grounding_check validates citations
+    # and claims against this, not against "does the string occur".
+    evidence_index: Optional[dict]
+
+    # Retrievals that FAILED (as opposed to returning nothing), derived
+    # from question_results: [{source, question, error_type, message,
+    # stage, attempts, seconds, turn}], and the per-source rollup
+    # {cypher|vector|cskg: {status, questions, failed, errors}}.
+    dependency_failures: Optional[List[dict]]
+    source_status: Optional[dict]

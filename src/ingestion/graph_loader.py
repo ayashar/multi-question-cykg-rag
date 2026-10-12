@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import re
 from pathlib import Path
 
 from src.config.settings import (
@@ -120,6 +121,44 @@ MATCH (a:Alert {id: $alert_id}), (c:Chunk {id: $chunk_id})
 MERGE (a)-[:TRIGGERS {timestamp: $timestamp}]->(m)
 MERGE (c)-[:HAS_ENTITY]->(m)
 """
+
+# Preserve the single-alert graph schema, but embed and commit a bounded batch
+# at once. One atomic transaction makes retries safe after a lost checkpoint.
+_INGEST_BATCH_CYPHER = "UNWIND $rows AS row\n" + re.sub(
+    r"\$(\w+)", r"row.\1", _INGEST_ALERT_CYPHER
+).replace("WITH a, c", "WITH a, c, row") + """
+FOREACH (tech IN row.techniques |
+    MERGE (m:MitreTechnique {id: tech.id})
+    SET m.tactic = coalesce(tech.tactic, m.tactic)
+    MERGE (a)-[:TRIGGERS {timestamp: row.timestamp}]->(m)
+    MERGE (c)-[:HAS_ENTITY]->(m)
+)
+"""
+
+
+def ingest_alerts(alerts: list[Alert]) -> None:
+    """Bounded, idempotent batch; no LLM calls and no label fields stored."""
+    if not alerts:
+        return
+    texts = [_alert_narrative(alert) for alert in alerts]
+    embeddings = get_embeddings().embed_documents(texts)
+    if len(embeddings) != len(alerts):
+        raise ValueError("Embedding count does not match alert count")
+    rows = []
+    for alert, text, embedding in zip(alerts, texts, embeddings):
+        rows.append({
+            "id": alert.id, "agent_name": alert.agent_name,
+            "title": alert.rule_description, "rule_id": alert.rule_id,
+            "rule_level": alert.rule_level, "timestamp": alert.timestamp,
+            "full_log": alert.full_log, "scenario_id": alert.scenario_id,
+            "chunk_text": text, "chunk_embedding": embedding,
+            "srcip": alert.data_srcip, "dstip": alert.data_dstip,
+            "dstuser": alert.data_dstuser,
+            "techniques": [{"id": tid, "tactic": tactic} for tid, tactic in
+                itertools.zip_longest(alert.rule_mitre_id, alert.rule_mitre_tactic)
+                if tid is not None],
+        })
+    graph.query(_INGEST_BATCH_CYPHER, {"rows": rows})
 
 
 def ingest_alert(alert: Alert) -> None:

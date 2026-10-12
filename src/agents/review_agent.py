@@ -19,6 +19,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 from src.config.settings import llm
+from src.config.structured import structured_model
 
 
 class ReviewOutput(BaseModel):
@@ -45,7 +46,18 @@ review_prompt = ChatPromptTemplate.from_messages([
         "retrieved context contains a usable factual data point -- a clear negative counts -- and "
         "(b) whether it confirms, rules out, or leaves inconclusive the stated hypothesis. Do not "
         "default to 'inconclusive' just because the result is short or empty: reason about what "
-        "that specific result implies for this specific hypothesis."
+        "that specific result implies for this specific hypothesis. "
+        "The context may be divided into 'CASE-LOCAL EVIDENCE' (alerts that are members of the case "
+        "under investigation) and 'HISTORICAL EVIDENCE' (other alerts in the environment). A "
+        "hypothesis about what happened in this case can only be confirmed by case-local rows; "
+        "historical rows can confirm or rule out only recurrence/baseline hypotheses, and an empty "
+        "case-local section means the case itself contains no such evidence, whatever the historical "
+        "section shows. A truncated or selectively retrieved section is not an exhaustive search: "
+        "absence cannot rule out unobserved activity. A failed query is not negative evidence. "
+        "A detector firing proves an observation, not its intent or cause. Resource-usage anomalies "
+        "alone cannot distinguish workload, cracking, mining, or faults; protocol anomalies alone "
+        "cannot establish interception or exfiltration. Public MITRE descriptions and mitigations "
+        "never confirm a case hypothesis without case-local behavioral evidence."
     ),
     (
         "human",
@@ -53,4 +65,4 @@ review_prompt = ChatPromptTemplate.from_messages([
         "Evaluate sufficiency and the hypothesis verdict.",
     ),
 ])
-review_chain = review_prompt | llm.with_structured_output(ReviewOutput)
+review_chain = review_prompt | structured_model(llm, ReviewOutput)
