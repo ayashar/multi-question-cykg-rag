@@ -38,6 +38,7 @@ export function EvidenceList({ label, values }: { label: string; values: string[
 
 export default function CaseDetails({ value, manualTimeRange = false }: { value: Case; manualTimeRange?: boolean }) {
   const urgency = value.urgency_score >= 70 ? "High" : value.urgency_score >= 40 ? "Medium" : "Low";
+  const hasManualMetadata = !manualTimeRange || value.alert_count > 0 || value.alert_ids.length > 0;
   return (
     <section aria-labelledby="case-detail-title" className="rounded-[10px] bg-primary-100 p-5 text-primary-1000">
       <h2 id="case-detail-title" className="font-h6 mb-4">Case Detail</h2>
@@ -46,8 +47,8 @@ export default function CaseDetails({ value, manualTimeRange = false }: { value:
         <Field label="First Seen">{formatInvestigationTime(value.first_seen)}</Field>
         <Field label="Last Seen">{formatInvestigationTime(value.last_seen)}</Field>
         <Field label="MITRE ATT&CK"><MitreBadges techniques={value.mitre_techniques} maxVisible={value.mitre_techniques.length} /></Field>
-        <Field label="Urgency">{manualTimeRange ? "Not provided" : <>{value.urgency_score.toFixed(1)} <span className="ml-1">{urgency}</span></>}</Field>
-        <Field label="Alert Count">{manualTimeRange ? "Not provided" : `${value.alert_count} alerts`}</Field>
+        <Field label="Urgency">{hasManualMetadata ? <>{value.urgency_score.toFixed(1)} <span className="ml-1">{urgency}</span></> : "Not provided"}</Field>
+        <Field label="Alert Count">{hasManualMetadata ? `${value.alert_count} alerts` : "Not provided"}</Field>
         <EvidenceList label="Alert IDs" values={value.alert_ids} />
         <EvidenceList label="Hosts" values={value.hosts} />
         <EvidenceList label="Source IPs" values={value.src_ips} />

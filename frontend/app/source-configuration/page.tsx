@@ -9,12 +9,14 @@ import { ApiErrorView } from "@/components/ui/error-states";
 const emptyConfig: IngestionConfig = { alerts_path: "", speed: 100000, max_gap_seconds: 0.2 };
 
 export default function SourceConfigurationPage() {
+  const isDemoMode = process.env.NEXT_PUBLIC_USE_MOCK === "true";
   const [config, setConfig] = useState<IngestionConfig>(emptyConfig);
   const [status, setStatus] = useState<IngestionStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<unknown>(null);
+  const [loadError, setLoadError] = useState<unknown>(null);
+  const [saveError, setSaveError] = useState<unknown>(null);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
@@ -22,25 +24,25 @@ export default function SourceConfigurationPage() {
     Promise.all([getIngestionConfig(), getIngestionStatus()])
       .then(([nextConfig, nextStatus]) => {
         if (cancelled) return;
+        setLoadError(null);
         setConfig({ ...nextConfig, alerts_path: nextConfig.alerts_path ?? "" });
         setStatus(nextStatus);
       })
-      .catch((reason) => { if (!cancelled) setError(reason); })
+      .catch((reason) => { if (!cancelled) setLoadError(reason); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [attempt]);
 
-  async function save(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function save() {
     setSaving(true);
     setSaved(false);
-    setError(null);
+    setSaveError(null);
     try {
       const updated = await updateIngestionConfig({ ...config, alerts_path: config.alerts_path || null });
       setConfig({ ...updated, alerts_path: updated.alerts_path ?? "" });
       setSaved(true);
     } catch (reason) {
-      setError(reason);
+      setSaveError(reason);
     } finally {
       setSaving(false);
     }
@@ -55,37 +57,39 @@ export default function SourceConfigurationPage() {
       </div>
 
       {process.env.NEXT_PUBLIC_USE_MOCK === "true" && <div className="rounded-[3px] border border-primary-300 bg-primary-100/50 px-4 py-3 font-b2 text-primary-900">Demo mode · changes stay in frontend memory and no backend request is sent.</div>}
-      {loading && <p role="status" className="flex items-center gap-2 font-b2"><LoaderCircle className="size-4 animate-spin" aria-hidden="true" />Loading demo configuration…</p>}
-      {!loading && error !== null && <ApiErrorView error={error} onRetry={() => {
+      {loading && <p role="status" aria-live="polite" className="flex items-center gap-2 font-b2"><LoaderCircle className="size-4 animate-spin" aria-hidden="true" />{isDemoMode ? "Loading demo configuration…" : "Loading source configuration…"}</p>}
+      {!loading && loadError !== null && <ApiErrorView error={loadError} onRetry={() => {
         setLoading(true);
-        setError(null);
+        setLoadError(null);
         setAttempt((value) => value + 1);
       }} />}
 
-      {!loading && error === null && <>
+      {!loading && loadError === null && <>
         <div className="grid gap-4 sm:grid-cols-3">
           <article className="rounded-[8px] border border-neutral-300 bg-background p-4"><p className="font-b3 text-neutral-700">Ingested alerts</p><p className="mt-1 font-h6">{status?.alert_count.toLocaleString() ?? 0}</p></article>
           <article className="rounded-[8px] border border-neutral-300 bg-background p-4"><p className="font-b3 text-neutral-700">Earliest alert</p><p className="mt-1 font-b2 font-semibold">{status?.earliest_alert_timestamp ?? "Not available"}</p></article>
           <article className="rounded-[8px] border border-neutral-300 bg-background p-4"><p className="font-b3 text-neutral-700">Latest alert</p><p className="mt-1 font-b2 font-semibold">{status?.latest_alert_timestamp ?? "Not available"}</p></article>
         </div>
 
-        <form onSubmit={save} className="space-y-5 rounded-[8px] border border-primary-200 bg-primary-100/50 p-5">
+        <form onSubmit={(event) => { event.preventDefault(); void save(); }} className="space-y-5 rounded-[8px] border border-primary-200 bg-primary-100/50 p-5">
           <div className="flex items-center gap-2"><Database className="size-5 text-primary-700" aria-hidden="true" /><h2 className="font-h7 font-semibold">Alert replay source</h2></div>
           <label className="block font-b2 font-semibold">Alerts path
-            <input value={config.alerts_path ?? ""} onChange={(event) => setConfig((value) => ({ ...value, alerts_path: event.target.value }))} className="mt-1.5 h-10 w-full rounded-[3px] border border-primary-400 bg-background px-3 font-b2 outline-none focus:ring-2 focus:ring-primary-300" />
+            <input disabled={saving} value={config.alerts_path ?? ""} onChange={(event) => { setSaved(false); setSaveError(null); setConfig((value) => ({ ...value, alerts_path: event.target.value })); }} className="mt-1.5 h-10 w-full rounded-[3px] border border-primary-400 bg-background px-3 font-b2 outline-none focus:ring-2 focus:ring-primary-300 disabled:cursor-not-allowed disabled:opacity-60" />
           </label>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block font-b2 font-semibold">Replay speed
-              <input type="number" min="1" value={config.speed} onChange={(event) => setConfig((value) => ({ ...value, speed: Number(event.target.value) }))} className="mt-1.5 h-10 w-full rounded-[3px] border border-primary-400 bg-background px-3 font-b2 outline-none focus:ring-2 focus:ring-primary-300" />
+              <input disabled={saving} type="number" min="1" value={config.speed} onChange={(event) => { setSaved(false); setSaveError(null); setConfig((value) => ({ ...value, speed: Number(event.target.value) })); }} className="mt-1.5 h-10 w-full rounded-[3px] border border-primary-400 bg-background px-3 font-b2 outline-none focus:ring-2 focus:ring-primary-300 disabled:cursor-not-allowed disabled:opacity-60" />
             </label>
             <label className="block font-b2 font-semibold">Maximum gap (seconds)
-              <input type="number" min="0" step="0.1" value={config.max_gap_seconds} onChange={(event) => setConfig((value) => ({ ...value, max_gap_seconds: Number(event.target.value) }))} className="mt-1.5 h-10 w-full rounded-[3px] border border-primary-400 bg-background px-3 font-b2 outline-none focus:ring-2 focus:ring-primary-300" />
+              <input disabled={saving} type="number" min="0" step="0.1" value={config.max_gap_seconds} onChange={(event) => { setSaved(false); setSaveError(null); setConfig((value) => ({ ...value, max_gap_seconds: Number(event.target.value) })); }} className="mt-1.5 h-10 w-full rounded-[3px] border border-primary-400 bg-background px-3 font-b2 outline-none focus:ring-2 focus:ring-primary-300 disabled:cursor-not-allowed disabled:opacity-60" />
             </label>
           </div>
           <div className="flex items-center gap-3">
             <Button type="submit" disabled={saving} className="bg-primary-700 px-5 text-white hover:bg-primary-800 disabled:opacity-60">{saving ? <LoaderCircle className="size-4 animate-spin" aria-hidden="true" /> : <Save className="size-4" aria-hidden="true" />}Save configuration</Button>
-            {saved && <p role="status" className="flex items-center gap-1 font-b2 text-green-500"><CheckCircle2 className="size-4" aria-hidden="true" />Demo configuration saved.</p>}
+            {saving && <p role="status" aria-live="polite" className="font-b2 text-neutral-700">Saving configuration…</p>}
+            {saved && <p role="status" aria-live="polite" className="flex items-center gap-1 font-b2 text-green-500"><CheckCircle2 className="size-4" aria-hidden="true" />{isDemoMode ? "Demo configuration saved locally." : "Configuration saved successfully."}</p>}
           </div>
+          {saveError !== null && <ApiErrorView error={saveError} onRetry={() => void save()} />}
         </form>
       </>}
     </section>

@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { Case, TurnRecord } from "@/api";
 import SourceConfiguration from "@/modules/ingestion/components/source-configuration";
 import InvestigationChatroom from "@/modules/investigation/components/investigation-chatroom";
+import SourceConfigurationPage from "../../../../app/source-configuration/page";
 
 const value: Case = {
   case_id: "case-ui",
@@ -88,4 +89,11 @@ test("FR6 explains the operational effect of saving ingestion settings", () => {
   assert.match(html, /restart the separate ingestion process manually/);
   assert.match(html, /not a live SIEM connection/);
   assert.match(html, /data\/alerts\.jsonl/);
+});
+
+test("live source configuration uses neutral loading copy", () => {
+  const html = renderToStaticMarkup(<SourceConfigurationPage />);
+  assert.match(html, /Loading source configuration/);
+  assert.doesNotMatch(html, /Loading demo configuration/);
+  assert.doesNotMatch(html, /Demo configuration saved/);
 });

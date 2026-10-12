@@ -61,6 +61,18 @@ test("case details render real metadata, timezone, and expandable evidence", () 
   assert.match(html, /Not available/);
 });
 
+test("manual case details show backend metadata when the time range returned it", () => {
+  const html = renderToStaticMarkup(<CaseDetails value={value} manualTimeRange />);
+  assert.match(html, /7 alerts/);
+  assert.match(html, /40\.0/);
+  assert.match(html, /Medium/);
+
+  const legacyManualValue = { ...value, alert_ids: [], alert_count: 0, urgency_score: 0 };
+  const legacyHtml = renderToStaticMarkup(<CaseDetails value={legacyManualValue} manualTimeRange />);
+  assert.match(legacyHtml, /Not provided/);
+  assert.doesNotMatch(legacyHtml, /0 alerts/);
+});
+
 test("failed report content and download actions are suppressed, null fields stay explicit", () => {
   const failed = renderToStaticMarkup(<InvestigationReport value={value} turn={{ ...turn, error: "Pipeline failed" }} />);
   assert.match(failed, /Pipeline Failure/);
