@@ -16,10 +16,62 @@ was needed, is now decided per-question by question_generation_agent's
 from typing import List, Literal
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
-from src.config.settings import llm
+from src.config.settings import llm, fast_llm
+from src.config.structured import structured_model
+
+
+class ReportClaim(BaseModel):
+    """One checkable statement. src/agents/grounding_check.py validates
+    every claim against the alerts it cites (existence, case membership,
+    entity presence). Whether those alerts actually support the claim is
+    rated here, by the synthesizer itself, in `support` (see SELF-VALIDATION
+    in the prompt below). That rating is used as is by default;
+    EVIDENCE_CLAIM_VERIFIER=llm has a separate verifier audit it instead."""
+    claim: str = Field(description="One atomic factual statement that final_answer or critical_analysis asserts, "
+                       "in a single sentence. State what the cited alerts show, no more.")
+    scope: Literal["case", "historical", "knowledge_base", "not_found"] = Field(
+        description="'case' if the statement is about this case's own activity and rests on CASE-LOCAL alerts "
+        "(or member alerts listed in the Case Context); 'historical' if it is about other or earlier activity "
+        "and rests on HISTORICAL EVIDENCE; 'knowledge_base' if it is general MITRE/CVE knowledge taken from "
+        "the Cybersecurity Knowledge Base Context; 'not_found' if it is a negative finding -- that the "
+        "retrieved evidence contains no sign of something."
+    )
+    evidence_alert_ids: List[str] = Field(
+        default_factory=list,
+        description="Alert IDs, copied exactly from the context, whose own content supports this claim. "
+        "Required for 'case' and 'historical' claims; leave empty for 'knowledge_base' and 'not_found' claims.",
+    )
+    entities: List[str] = Field(
+        default_factory=list,
+        description="The hosts, IPs, users, domains or technique IDs this claim is about, exactly as they "
+        "appear in the cited alerts.",
+    )
+    # Reason before rating, so the rating is written after the alerts have
+    # been re-read rather than before.
+    support_reason: str = Field(
+        default="",
+        description="One sentence naming what the cited alerts do and do not show about this claim, judged "
+        "from those alerts alone. 'Not applicable.' for 'knowledge_base' and 'not_found' claims.",
+    )
+    support: Literal["supported", "partially_supported", "unsupported", "contradicted", "not_applicable"] = Field(
+        default="not_applicable",
+        description="Your own check of this claim against ONLY the alerts in evidence_alert_ids (see "
+        "SELF-VALIDATION). Required for 'case' and 'historical' claims: 'supported' if those alerts directly "
+        "show what the claim says; 'partially_supported' if the claim goes further than they do; 'unsupported' "
+        "if they do not show it; 'contradicted' if they show the opposite. 'not_applicable' only for "
+        "'knowledge_base' and 'not_found' claims.",
+    )
 
 
 class SynthesizedReport(BaseModel):
+    maliciousness: Literal['benign', 'suspicious', 'malicious', 'undetermined'] = Field(
+        default='undetermined', description='Assessment of this case, separate from the decision to escalate. '
+        'Malicious requires case-local behavior establishing an attack, not merely a detector or MITRE tag.')
+    uncertainty: List[str] = Field(default_factory=list,
+        description='Missing evidence, competing explanations, retrieval gaps, and limits of the sampled context.')
+    escalation_rationale: str = Field(default='',
+        description='Why to escalate, monitor, or ignore based on supported observations and potential impact. '
+        'Escalation can request human investigation without asserting a confirmed attack.')
     original_question: str = Field(description="The user's original question, restated.")
     cypher_context_summary: str = Field(description="Summary of the Cypher/graph query context, or 'Not applicable for this query.'")
     vector_context_summary: str = Field(description="Summary of the vector/full-text search context, or 'Not applicable for this query.'")
@@ -37,6 +89,12 @@ class SynthesizedReport(BaseModel):
     mitre_techniques: List[str] = Field(
         default_factory=list,
         description="MITRE ATT&CK technique IDs (e.g. 'T1110') referenced in the analysis.",
+    )
+    claims: List[ReportClaim] = Field(
+        default_factory=list,
+        description="Every factual statement final_answer and critical_analysis rely on, one entry each, with "
+        "the alert IDs that support it. Any alert ID mentioned anywhere in the report must appear in some "
+        "claim's evidence_alert_ids. Leave empty only for a pure general-knowledge answer with no alert data.",
     )
     confidence: Literal["low", "medium", "high"] = Field(
         description="Confidence in final_answer given how much of the available evidence actually supports it. "
@@ -63,11 +121,68 @@ synthesis_prompt = ChatPromptTemplate.from_template("""You are an expert cyberse
 Your task is to synthesize information gathered across several investigative questions -- each
 generated to confirm or rule out a specific hypothesis about this alert -- into one report.
 
+Separate (1) directly observed behavior, (2) inferred explanation and alternatives, and (3) action.
+Use maliciousness and uncertainty explicitly. Escalation is a request for human investigation,
+not a declaration that an attack is proven; state its rationale independently. Do not describe a
+whole case as primarily benign or malicious from a few excerpts. Use the activity-group counts
+to describe its composition, and acknowledge unexamined groups. A large cluster can contain
+unrelated benign and suspicious behaviors at once.
+MITRE technique descriptions are general reference knowledge, NEVER confirmation that a technique
+occurred here. Keep detector-tagged, hypothesized and behaviorally supported techniques distinct.
+Do not infer a specific tool, intent, successful compromise, or causal chain from a nonspecific
+anomaly. A resource-usage spike has several possible causes; a protocol error does not establish
+interception. Negative findings apply only to the retrieved evidence, not the entire environment.
+Final_answer must distinguish observations, assessment/uncertainty, and the recommended action.
+
 If a section's source has no data (e.g. no log data was queried), state "Not applicable for this query." for that field.
 
 CRITICAL: only put entities (hostnames, IPs, usernames, MITRE technique IDs, etc.) into cited_entities/mitre_techniques
 or reference them in critical_analysis/final_answer if they literally appear in the context below. Do not invent
 or infer entities that are not present in the provided context.
+
+EVIDENCE SCOPE: when this is a case investigation, retrieved context is split into two channels.
+"CASE-LOCAL EVIDENCE" holds alerts that are members of this case; the member alerts listed in the Case
+Context are case-local too. "HISTORICAL EVIDENCE" holds other alerts from the environment and is background
+only. Anything you conclude about this case -- which hosts or IPs are involved, which technique was used,
+whether the activity is malicious, how urgent it is -- must rest on case-local alerts. Historical alerts
+may support only statements that are explicitly about other or earlier activity (recurrence, baseline),
+and you must describe them as outside this case. Never name a host, IP or alert as involved in this case
+on the strength of historical evidence alone.
+
+CLAIMS: fill `claims` with every factual statement your final_answer and critical_analysis rely on, one
+per entry, each with the alert IDs whose own content supports it and the scope those alerts belong to.
+Every alert ID you mention anywhere must appear in some claim's evidence_alert_ids. Each claim is checked
+afterwards against exactly the alerts it cites: write claims that state what those alerts show. If you
+cannot tie a statement to a specific alert, do not present it as established -- say it is unverified.
+A negative finding ("no alert in this case indicates lateral movement") is a 'not_found' claim with no
+alert IDs; it records that the retrieved evidence was silent, not that the activity did not happen.
+
+SELF-VALIDATION: check whether your claims follow from their evidence before you finish. A separate
+verifier may audit these claims; your self-rating is not independent confirmation. For each 'case' or
+'historical' claim, re-read ONLY the alerts it cites -- not the case fact sheet,
+not the hypothesis summary, not the rest of your draft -- and decide whether those alerts, by themselves,
+establish the claim. Write what they do and do not show in support_reason, then set support:
+- supported: the cited alerts directly state or show what the claim says.
+- partially_supported: they show something related, but the claim goes further than they do -- for example
+  it asserts intent, a technique, a cause, a scope or a degree of certainty that the alerts do not show.
+- unsupported: they do not show it.
+- contradicted: they show the opposite.
+Use nothing except the cited alerts: not background knowledge, not what is typical, not what the claim's
+wording suggests. A record of a detector or rule firing shows that it fired on that value; whether the
+underlying activity is malicious is a separate claim that needs alerts showing it. Whether an alert belongs
+to this case is settled by the section it appears in (CASE-LOCAL, Case Context or HISTORICAL), so do not
+expect an alert's own text to mention the case. Judge strictly, and when undecided between two levels
+choose the lower.
+If a claim does not come out 'supported', first restate it as what the cited alerts actually show and rate
+that instead. If you still keep a claim that is not 'supported', rate it as it is: final_answer and
+critical_analysis must then present it as unverified, and confidence and recommended_priority must rest
+only on the claims you rated 'supported'. These ratings decide how much the report is allowed to assert, so
+rate accurately rather than favourably. Every 'case' or 'historical' claim needs a rating; set support to
+'not_applicable' only for 'knowledge_base' and 'not_found' claims.
+
+RETRIEVAL FAILURES: if a source is listed under "Retrieval failures" below, it could not be queried at
+all. Say so in that source's summary field (do not write "Not applicable"), do not treat the missing
+result as a negative finding, and do not fill the gap from your own knowledge.
 
 Use the hypothesis summary below as your primary reasoning scaffold: weigh which hypotheses were
 confirmed, ruled out, or left inconclusive, and let that drive critical_analysis and final_answer --
@@ -106,7 +221,13 @@ not restate the whole case from scratch.
 
 **Cybersecurity Knowledge Base Context (from RDF Agent):**
 {mcp_rdf_context}
+
+**Retrieval failures (sources that could not be queried this investigation):**
+{retrieval_failures}
 {retry_note}
 """)
 
-synthesis_chain = synthesis_prompt | llm.with_structured_output(SynthesizedReport)
+synthesis_chain = synthesis_prompt | structured_model(llm, SynthesizedReport)
+# Cost-tier routing (see src/config/settings.py::fast_llm) -- workflow.py's
+# synthesize_node picks between these two based on investigation_mode.
+synthesis_chain_fast = synthesis_prompt | structured_model(fast_llm, SynthesizedReport)

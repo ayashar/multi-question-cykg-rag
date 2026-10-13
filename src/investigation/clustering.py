@@ -268,7 +268,7 @@ def _case_id(alert_ids: List[str]) -> str:
     return f"case-{digest[:12]}"
 
 
-def score_urgency(case: Case) -> float:
+def score_urgency(case: Case, reference_time: Optional[str] = None) -> float:
     """Deterministic 0-100 urgency score, reusing signals already justified
     elsewhere in this codebase rather than inventing new unvalidated ones:
     _trigger_reason (the old auto-escalate gate, verified against AIT-ADS
@@ -281,7 +281,7 @@ def score_urgency(case: Case) -> float:
     noteworthy_component = min(case.noteworthy_alert_count / 3, 1.0)
     severity_component = case.max_rule_level / 15
     size_component = min(case.alert_count / 10, 1.0)
-    recency_component = temporal_weight(case.last_seen, now_iso())
+    recency_component = temporal_weight(case.last_seen, reference_time or now_iso())
     score = 100 * (
         0.35 * noteworthy_component
         + 0.25 * severity_component
@@ -291,7 +291,7 @@ def score_urgency(case: Case) -> float:
     return round(score, 1)
 
 
-def _to_case(alerts: List[Alert]) -> Case:
+def _to_case(alerts: List[Alert], reference_time: Optional[str] = None) -> Case:
     alert_ids = [a.id for a in alerts]
     timestamps = [_parse_ts(a.timestamp) for a in alerts]
     # "Noteworthy" now also counts a sigma match on its own, even absent a
@@ -314,16 +314,16 @@ def _to_case(alerts: List[Alert]) -> Case:
         max_rule_level=max(a.rule_level for a in alerts),
         noteworthy_alert_count=noteworthy,
     )
-    case.urgency_score = score_urgency(case)
+    case.urgency_score = score_urgency(case, reference_time)
     return case
 
 
-def cluster_alerts(alerts: List[Alert]) -> List[Case]:
+def cluster_alerts(alerts: List[Alert], reference_time: Optional[str] = None) -> List[Case]:
     if not alerts:
         return []
     session_clusters = _session_cluster_per_host(alerts)
     merged_groups = _merge_cross_host(session_clusters)
-    return [_to_case([a for cluster in group for a in cluster.alerts]) for group in merged_groups]
+    return [_to_case([a for cluster in group for a in cluster.alerts], reference_time) for group in merged_groups]
 
 
 def list_cases(lookback_hours: float = 24.0) -> List[Case]:

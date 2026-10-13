@@ -1,7 +1,23 @@
-title: Permission/Ownership Change on Sensitive System File
+title: Sensitive System File Accessed or Modified
 id: ait-sensitive-file-perm-001
 status: experimental
-description: Modification of permissions/ownership on a credential or auth-relevant file.
+description: >
+  A credential-relevant system file (/etc/passwd, /etc/shadow,
+  /etc/sudoers) was read, modified, or had its permissions/ownership
+  changed. Originally permission-change-only (chmod/chown/modified in
+  rule_description); checking against real AIT-ADS data found a genuine
+  miss it should have caught -- a real `sudo ... COMMAND=/bin/cat
+  /etc/shadow` read, whose rule_description ("Successful sudo to ROOT
+  executed.") never mentions permissions at all. Broadened to a single
+  full_log regex covering both permission-change verbs and command-
+  execution/read indicators, since the original two-field (rule_description
+  AND full_log) split can't be OR'd without parenthesized conditions,
+  which src/investigation/sigma_matcher.py's condition language doesn't
+  support (see its own docstring on the supported subset). Tags both
+  T1222 (permission modification) and T1003.008 (credential dumping via
+  /etc/passwd and /etc/shadow) since either technique can produce this
+  pattern -- treat the specific technique as ambiguous without reading
+  the matched full_log text yourself.
 logsource:
     category: file_event
     product: linux
@@ -12,13 +28,11 @@ detection:
             - '/etc/shadow'
             - '/etc/sudoers'
     selection_action:
-        rule_description|contains:
-            - 'permission'
-            - 'chmod'
-            - 'chown'
-            - 'modified'
+        full_log|re: '(chmod|chown|permission|mode\s*=|COMMAND=.*(cat|less|more|head|tail|cp|scp|vim|nano)|/bin/(cat|less|more|head|tail))'
     condition: selection_path and selection_action
 level: high
 tags:
     - attack.t1222
+    - attack.t1003.008
     - attack.defense_evasion
+    - attack.credential_access

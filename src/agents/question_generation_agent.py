@@ -39,7 +39,8 @@ from __future__ import annotations
 from typing import List, Literal
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
-from src.config.settings import llm
+from src.config.settings import llm, fast_llm
+from src.config.structured import structured_model
 
 
 class GeneratedQuestion(BaseModel):
@@ -80,8 +81,15 @@ class QuestionSet(BaseModel):
 question_generation_prompt = ChatPromptTemplate.from_messages([
     (
         "system",
-        """You are a SOC analyst forming a differential diagnosis for a single security alert,
+        """You are a SOC analyst forming a differential diagnosis for a security activity case,
 before committing to one interpretation of it.
+
+Use the activity-group counts and diverse member excerpts to cover different behaviors in the
+case. Do not anchor every hypothesis on the first alert or the highest-volume group. Include a
+question about corroborating or contradictory evidence for any proposed attack explanation.
+Treat attack names as alternatives to investigate, not conclusions. Do not ask whether earlier
+activity was resolved as benign or authorized: this store contains alerts, not analyst verdicts.
+MITRE descriptions explain possibilities; they cannot confirm occurrence in this environment.
 
 The same alert can be part of very different real situations depending on context -- e.g. an
 "authentication success from a new location" alert could be a traveling employee, a
@@ -151,7 +159,11 @@ Always include at least one benign/expected-activity hypothesis. Produce 3 to 5 
     ),
 ])
 
-question_generation_chain = question_generation_prompt | llm.with_structured_output(QuestionSet)
+question_generation_chain = question_generation_prompt | structured_model(llm, QuestionSet)
+# Cost-tier routing (see src/config/settings.py::fast_llm) -- direct_question
+# turns are a single narrow follow-up, not a differential-diagnosis task, so
+# generate_questions() below routes them to the cheaper model.
+question_generation_chain_fast = question_generation_prompt | structured_model(fast_llm, QuestionSet)
 
 _MODE_INSTRUCTIONS = {
     "full_hypothesis": (
@@ -182,7 +194,8 @@ def generate_questions(
     question_generation_node. `mode` is guardrails_agent.py's
     investigation_mode decision ('answer_from_context' never reaches here --
     question_generation_node skips this call entirely in that case)."""
-    return question_generation_chain.invoke({
+    chain = question_generation_chain if mode == "full_hypothesis" else question_generation_chain_fast
+    return chain.invoke({
         "alert_summary": alert_summary,
         "case_context": case_context,
         "conversation_context": conversation_context,

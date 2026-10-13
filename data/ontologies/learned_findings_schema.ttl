@@ -1,0 +1,86 @@
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix finding: <http://multi-agents-cykg-rag.local/ontology/learned-findings#> .
+
+<http://multi-agents-cykg-rag.local/ontology/learned-findings> a owl:Ontology ;
+    rdfs:label "Learned Findings Ontology" ;
+    rdfs:comment "Cross-case investigation memory schema for multi-agents-cykg-rag (RQ5). A deterministic gate (src/investigation/knowledge_base.py::is_storage_worthy) decides which investigation turns become instances of this schema; data instances live separately in data/learned_findings.ttl, not in this file." .
+
+finding:LearnedFinding a owl:Class ;
+    rdfs:label "Learned Finding" ;
+    rdfs:comment "A stored, storage-worthy conclusion from one investigation turn, keyed by (caseId, turnIndex)." .
+
+finding:Entity a owl:Class ;
+    rdfs:label "Entity" ;
+    rdfs:comment "Generic referent of a LearnedFinding -- a host, IP, user, or MITRE technique this finding is about. Kind is encoded in the entity's own IRI path segment (host/ip/user/technique), not a distinct rdf:type." .
+
+finding:caseId a owl:DatatypeProperty ;
+    rdfs:domain finding:LearnedFinding ;
+    rdfs:range xsd:string ;
+    rdfs:label "case id" ;
+    rdfs:comment "The investigation case this finding was produced in." .
+
+finding:turnIndex a owl:DatatypeProperty ;
+    rdfs:domain finding:LearnedFinding ;
+    rdfs:range xsd:integer ;
+    rdfs:label "turn index" ;
+    rdfs:comment "1-based turn number within the case's investigation thread." .
+
+finding:answer a owl:DatatypeProperty ;
+    rdfs:domain finding:LearnedFinding ;
+    rdfs:range xsd:string ;
+    rdfs:label "answer" .
+
+finding:criticalAnalysis a owl:DatatypeProperty ;
+    rdfs:domain finding:LearnedFinding ;
+    rdfs:range xsd:string ;
+    rdfs:label "critical analysis" .
+
+finding:mitigationSuggestion a owl:DatatypeProperty ;
+    rdfs:domain finding:LearnedFinding ;
+    rdfs:range xsd:string ;
+    rdfs:label "mitigation suggestion" ;
+    rdfs:comment "Repeatable -- one triple per suggestion." .
+
+finding:confidence a owl:DatatypeProperty ;
+    rdfs:domain finding:LearnedFinding ;
+    rdfs:range xsd:string ;
+    rdfs:label "confidence" .
+
+finding:recommendedPriority a owl:DatatypeProperty ;
+    rdfs:domain finding:LearnedFinding ;
+    rdfs:range xsd:string ;
+    rdfs:label "recommended priority" .
+
+finding:timestamp a owl:DatatypeProperty ;
+    rdfs:domain finding:LearnedFinding ;
+    rdfs:range xsd:dateTime ;
+    rdfs:label "timestamp" .
+
+finding:mitreTechnique a owl:DatatypeProperty ;
+    rdfs:domain finding:LearnedFinding ;
+    rdfs:range xsd:string ;
+    rdfs:label "MITRE technique (literal)" ;
+    rdfs:comment "Repeatable literal technique ID, for rendering without dereferencing finding:aboutTechnique links." .
+
+finding:aboutHost a owl:ObjectProperty ;
+    rdfs:domain finding:LearnedFinding ;
+    rdfs:range finding:Entity ;
+    rdfs:label "about host" .
+
+finding:aboutIP a owl:ObjectProperty ;
+    rdfs:domain finding:LearnedFinding ;
+    rdfs:range finding:Entity ;
+    rdfs:label "about IP" .
+
+finding:aboutUser a owl:ObjectProperty ;
+    rdfs:domain finding:LearnedFinding ;
+    rdfs:range finding:Entity ;
+    rdfs:label "about user" .
+
+finding:aboutTechnique a owl:ObjectProperty ;
+    rdfs:domain finding:LearnedFinding ;
+    rdfs:range finding:Entity ;
+    rdfs:label "about technique" .

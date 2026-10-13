@@ -6,6 +6,7 @@ from langchain_openai import ChatOpenAI
 from langchain_neo4j import Neo4jGraph
 from langchain_neo4j.vectorstores.neo4j_vector import Neo4jVector
 from langchain_huggingface import HuggingFaceEmbeddings
+from src.config.models import build_chat_model, model_identity
 
 load_dotenv()
 
@@ -79,13 +80,19 @@ class _LazyProxy:
 
 
 def _build_llm() -> ChatOpenAI:
-    # A missing/empty OPENAI_API_KEY makes ChatOpenAI's constructor itself
-    # raise (it eagerly builds an openai.OpenAI client). Passing an obvious
-    # placeholder when unset lets construction succeed everywhere so agent
-    # modules can still be imported; the real failure then naturally surfaces
-    # as an auth error on first actual `.invoke()`, not at import time.
-    api_key = os.environ.get("OPENAI_API_KEY") or "sk-not-configured"
-    return ChatOpenAI(temperature=0, model_name="gpt-4o", api_key=api_key)
+    return build_chat_model()
+
+
+# Optional cost-tier routing: "fast thinking" turns (investigation_mode
+# direct_question/answer_from_context -- narrow, already-scoped follow-ups)
+# route to this model instead of the full `llm` below, in
+# src/agents/question_generation_agent.py and src/agents/synthesizer_agent.py.
+# Env-overridable, same convention as trigger.py's TRIGGER_SEVERITY_THRESHOLD.
+FAST_LLM_MODEL_NAME = model_identity()['fast_model']
+
+
+def _build_fast_llm() -> ChatOpenAI:
+    return build_chat_model(fast=True)
 
 
 def _neo4j_conn_kwargs() -> dict:
@@ -185,6 +192,7 @@ def _build_vector_index() -> Neo4jVector:
 
 # --- LLM init (always a real ChatOpenAI; see _build_llm for why this is safe) ---
 llm = _build_llm()
+fast_llm = _build_fast_llm()
 
 # --- Neo4j graph + vector index (lazy: connects on first real use) ---
 graph = _LazyProxy(_build_graph, "Neo4j graph connection")
