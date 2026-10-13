@@ -28,10 +28,51 @@ export interface TurnRecord {
   error: string | null;
   timestamp: string;
   latency_seconds: number;
+  validation_notice?: string | null;
+  validation?: Record<string, unknown> | null;
+  source_status?: Record<string, unknown> | null;
+  trace?: InvestigationTrace | null;
+}
+
+export interface InvestigationTrace {
+  mode?: string | null;
+  hypotheses?: Array<Record<string, unknown>>;
+  retrievals?: Array<Record<string, unknown>>;
+  claims?: Array<Record<string, unknown>>;
+  alerts?: Record<string, Record<string, unknown>>;
+  validation?: Record<string, unknown>;
+  source_status?: Record<string, unknown> | null;
+  dependency_failures?: string[];
+  uncertainty?: string[];
+  log?: InvestigationTraceLog[];
+  [key: string]: unknown;
+}
+
+export interface InvestigationTraceLog {
+  ts?: number;
+  agent?: string;
+  level?: string;
+  message: string;
+}
+
+export interface InvestigationServerEvent {
+  type: "turn_started" | "step_completed" | "log" | "turn_completed" | "turn_failed";
+  ts?: number;
+  turn_index?: number;
+  question?: string;
+  node?: string;
+  label?: string;
+  summary?: string;
+  elapsed?: number;
+  agent?: string;
+  level?: string;
+  message?: string;
+  error?: string | null;
+  latency_seconds?: number;
 }
 
 export interface InvestigationProgressEvent {
-  type: "agent" | "error" | "result";
+  type: "agent" | "log" | "error" | "result";
   status?: "running" | "complete";
   agent?: string;
   agent_id?: string;
@@ -40,6 +81,8 @@ export interface InvestigationProgressEvent {
   message?: string;
   timestamp: string;
   elapsed_seconds?: number;
+  level?: string;
+  source?: "backend" | "frontend";
   result?: TurnRecord;
 }
 
@@ -132,6 +175,7 @@ export type ApiEndpointKey =
   | "investigateTimeRange"
   | "sendChatMessage"
   | "getChatTranscript"
+  | "getTurnTrace"
   | "getIngestionConfig"
   | "updateIngestionConfig"
   | "getIngestionStatus"

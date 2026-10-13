@@ -1,5 +1,6 @@
 const DEFAULT_BACKEND_URL = "http://127.0.0.1:8000";
 const REQUEST_TIMEOUT_MS = 120_000;
+const EVENT_STREAM_TIMEOUT_MS = 660_000;
 
 const requestHeadersToForward = ["accept", "content-type"] as const;
 const responseHeadersToForward = ["cache-control", "content-disposition", "content-type"] as const;
@@ -60,7 +61,7 @@ export async function proxyBackendRequest(request: Request, path: string[]): Pro
       body: body?.byteLength ? body : undefined,
       cache: "no-store",
       redirect: "manual",
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(path.at(-1) === "events" ? EVENT_STREAM_TIMEOUT_MS : REQUEST_TIMEOUT_MS),
     });
 
     return new Response(upstream.body, {

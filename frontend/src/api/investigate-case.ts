@@ -6,6 +6,7 @@ import {
   type InvestigateCaseParams,
   type TurnRecord,
 } from "./client";
+import { runWithInvestigationEventStream } from "./investigation-events";
 import { demoDelay, getDemoCase, isDemoMode, startDemoInvestigation } from "@/demo/demo-data";
 
 export async function investigateCase(input: string | InvestigateCaseParams, explicitLookback?: number): Promise<TurnRecord> {
@@ -94,14 +95,12 @@ function createAgentEvent(
   };
 }
 
-export async function investigateCaseStream(
+async function streamReconstructedInvestigation(
   input: string | InvestigateCaseParams,
   onEvent: (event: InvestigationProgressEvent) => void,
-  explicitLookback?: number,
-  caseValue?: Case,
+  explicitLookback: number | undefined,
+  caseValue: Case | undefined,
 ): Promise<TurnRecord> {
-  const caseId = typeof input === "string" ? input : input.case_id;
-  if (isDemoMode()) return streamDemoInvestigation(caseId, onEvent);
   const started = Date.now();
   const timers: ReturnType<typeof setTimeout>[] = [];
   let completedThrough = -1;
@@ -122,12 +121,32 @@ export async function investigateCaseStream(
     for (let index = completedThrough + 1; index < DEMO_AGENTS.length; index++) {
       onEvent(createAgentEvent(index, "complete", started, caseValue));
     }
+    return result;
+  } finally {
+    timers.forEach(clearTimeout);
+  }
+}
+
+export async function investigateCaseStream(
+  input: string | InvestigateCaseParams,
+  onEvent: (event: InvestigationProgressEvent) => void,
+  explicitLookback?: number,
+  caseValue?: Case,
+): Promise<TurnRecord> {
+  const caseId = typeof input === "string" ? input : input.case_id;
+  if (isDemoMode()) return streamDemoInvestigation(caseId, onEvent);
+  const started = Date.now();
+  try {
+    const result = await runWithInvestigationEventStream(
+      caseId,
+      () => investigateCase(input, explicitLookback),
+      onEvent,
+      () => streamReconstructedInvestigation(input, onEvent, explicitLookback, caseValue),
+    );
     onEvent({ type: "result", result, timestamp: new Date().toISOString() });
     return result;
   } catch (reason) {
     onEvent({ type: "error", message: reason instanceof Error ? reason.message : "Investigation failed.", timestamp: new Date().toISOString(), elapsed_seconds: (Date.now() - started) / 1000 });
     throw reason;
-  } finally {
-    timers.forEach(clearTimeout);
   }
 }
