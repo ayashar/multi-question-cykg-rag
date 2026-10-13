@@ -9,9 +9,12 @@ Menggabungkan perubahan frontend di fork `ayashar/multi-question-cykg-rag` denga
 
 ## Posisi repository saat ini
 
-- Branch aktif: `main`
+- Branch aktif: `codex-integrate-upstream-backend`
 - `main` dan `origin/main`: `efa7299` — `fix frontend investigation states`
 - `upstream/main`: `792382f` — `log trace`
+- Checkpoint: `backup-main-before-upstream` menunjuk ke `efa7299`.
+- Commit frontend/integrasi: `3d4ddd9` — `feat(frontend): support upstream investigation events`.
+- Merge commit: `1cf777c` — `merge: integrate upstream backend trace updates`.
 - Remote:
   - `origin`: `https://github.com/ayashar/multi-question-cykg-rag.git`
   - `upstream`: `https://github.com/nauraranantya/multi-question-cykg-rag.git`
@@ -21,7 +24,7 @@ Jangan menekan tombol **Update branch** di GitHub. Tombol tersebut akan membuat 
 
 ## Perubahan frontend yang sudah dibuat
 
-Perubahan ini belum di-commit atau di-push:
+Perubahan frontend sudah diamankan dalam commit lokal `3d4ddd9` dan belum di-push:
 
 - Menambahkan dukungan event investigation dari backend melalui SSE.
 - Menambahkan fallback agar frontend tetap berjalan dengan backend lama yang belum punya SSE/trace.
@@ -61,6 +64,11 @@ Tidak ada source backend yang diubah dalam pekerjaan ini.
   - confidence `medium`
   - answer tersedia
   - trace belum tersedia karena backend lokal masih versi lama
+- Setelah merge upstream, smoke test backend tanpa OpenAI juga berhasil:
+  - `GET /cases?lookback_hours=100000`: HTTP `200`, 50 cases, target case tersedia.
+  - `GET /investigations/case-4b1dbace19bc/chat`: HTTP `200`.
+  - `GET /investigations/case-4b1dbace19bc/events?wait=false`: HTTP `200`.
+  - `GET /investigations/case-4b1dbace19bc/turns/1/trace`: HTTP `404`, expected karena turn hasil testing lama belum menyimpan trace.
 
 ## File lokal yang harus dijaga
 
@@ -70,7 +78,7 @@ Tidak ada source backend yang diubah dalam pekerjaan ini.
   - `stash@{0}: On main: local changes kept aside before pushing frontend fix`
   - Jangan pop atau hapus stash sebelum isi dan targetnya diverifikasi.
 
-Working tree saat handover masih memiliki perubahan frontend dan file untracked. Jangan memakai `git add .` secara membabi buta.
+Setelah merge, tracked files sudah committed dan working tree hanya menyisakan file untracked lokal. Jangan memakai `git add .` secara membabi buta.
 
 ## Rencana merge yang aman
 
@@ -164,6 +172,16 @@ git diff --cached --stat
 ```
 
 Commit hanya file yang memang disetujui. Push branch integrasi terlebih dahulu, bukan `main`. Merge ke `main` atau push ke `origin/main` hanya setelah user mengonfirmasi hasil test dan daftar file yang akan dikirim.
+
+## Hasil eksekusi plan
+
+- Branch `codex-integrate-upstream-backend` sudah dibuat.
+- Perubahan frontend dan handover sudah diamankan dalam commit lokal.
+- `upstream/main` sudah di-merge tanpa conflict ke branch integrasi.
+- Backend dan frontend sudah lolos validasi yang tersedia.
+- `main` tetap tidak berubah di `efa7299`.
+- Belum ada push ke `origin`.
+- Tidak ada live OpenAI call tambahan setelah testing yang sebelumnya diizinkan.
 
 ## Rekomendasi ownership
 
