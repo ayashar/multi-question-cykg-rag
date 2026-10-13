@@ -9,7 +9,7 @@ Menggabungkan perubahan frontend di fork `ayashar/multi-question-cykg-rag` denga
 
 ## Posisi repository saat ini
 
-- Branch aktif: `codex-integrate-upstream-backend`
+- Branch aktif: `integrate-upstream-backend`
 - `main` dan `origin/main`: `efa7299` — `fix frontend investigation states`
 - `upstream/main`: `792382f` — `log trace`
 - Checkpoint: `backup-main-before-upstream` menunjuk ke `efa7299`.
@@ -105,7 +105,7 @@ Sebelum merge, review diff dan commit hanya file frontend yang memang dimiliki p
 Buat branch integrasi terpisah, misalnya:
 
 ```bash
-git switch -c codex/integrate-upstream-backend
+git switch -c integrate-upstream-backend
 ```
 
 Lalu lakukan commit frontend secara selektif setelah review. Jika masih ada keraguan terhadap file untracked, simpan terpisah dan jangan masukkan ke commit.
@@ -175,7 +175,7 @@ Commit hanya file yang memang disetujui. Push branch integrasi terlebih dahulu, 
 
 ## Hasil eksekusi plan
 
-- Branch `codex-integrate-upstream-backend` sudah dibuat.
+- Branch `integrate-upstream-backend` sudah dibuat.
 - Perubahan frontend dan handover sudah diamankan dalam commit lokal.
 - `upstream/main` sudah di-merge tanpa conflict ke branch integrasi.
 - Backend dan frontend sudah lolos validasi yang tersedia.
