@@ -10,17 +10,17 @@ import {
   resolveLookbackHours,
 } from "../services/cases-service";
 
-const PRESET_KEY = "kgcs_active_lookback_preset";
-const HOURS_KEY = "kgcs_active_lookback_hours";
-const PRESET_EVENT = "kgcs-lookback-change";
+const PRESET_KEY = "cskg_active_lookback_preset";
+const HOURS_KEY = "cskg_active_lookback_hours";
+const PRESET_EVENT = "cskg-lookback-change";
 const validPresets = new Set<LookbackPreset>(["24h", "7d", "30d", "all"]);
 
 const subscribeHistory = (callback: () => void) => {
   window.addEventListener("storage", callback);
-  window.addEventListener("kgcs-investigation-history-change", callback);
+  window.addEventListener("cskg-investigation-history-change", callback);
   return () => {
     window.removeEventListener("storage", callback);
-    window.removeEventListener("kgcs-investigation-history-change", callback);
+    window.removeEventListener("cskg-investigation-history-change", callback);
   };
 };
 

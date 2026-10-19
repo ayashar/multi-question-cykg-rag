@@ -1,4 +1,4 @@
-# ChatBot KGCS frontend
+# ChatBot CSKG frontend
 
 ### Frontend demo mode
 

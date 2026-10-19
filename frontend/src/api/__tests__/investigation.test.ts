@@ -162,7 +162,7 @@ test("FR3 restores manual results after the in-memory session is lost", () => {
     assert.deepEqual(getPreparedTimeRangeInvestigation(manualTurn.case_id), prepared);
     assert.deepEqual(getInvestigatedCase(manualTurn.case_id)?.turn, manualTurn);
     assert.equal(isManualInvestigatedCase(manualTurn.case_id), true);
-    assert.match(localItems.get("kgcs_time_range_investigations") ?? "", /manual-persisted/);
+    assert.match(localItems.get("cskg_time_range_investigations") ?? "", /manual-persisted/);
   } finally {
     if (windowDescriptor) Object.defineProperty(globalThis, "window", windowDescriptor);
     else Reflect.deleteProperty(globalThis, "window");

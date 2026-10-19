@@ -17,7 +17,7 @@ const fontMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ChatBot KGCS",
+  title: "ChatBot CSKG",
   description: "Knowledge Graph Cybersecurity System",
 };
 

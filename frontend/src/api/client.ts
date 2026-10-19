@@ -322,7 +322,7 @@ export function resetApiConfig(): void {
 }
 
 const caseLookbackMap = new Map<string, number>();
-const LOOKBACK_STORAGE_KEY = "kgcs_case_lookback_map";
+const LOOKBACK_STORAGE_KEY = "cskg_case_lookback_map";
 
 function restoreLookbacks(): void {
   if (typeof window === "undefined") return;

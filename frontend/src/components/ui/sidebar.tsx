@@ -33,7 +33,7 @@ export default function Sidebar() {
         <div className="px-3 lg:px-5 py-5 flex items-center gap-3">
           <div className="w-11 h-11 rounded-[4px] bg-neutral-300 shrink-0" />
           <span className="hidden lg:block font-h7 text-neutral-1000 font-medium">
-            ChatBot KGCS
+            ChatBot CSKG
           </span>
         </div>
 

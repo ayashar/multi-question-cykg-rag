@@ -12,9 +12,9 @@ interface PendingInvestigation {
 }
 
 const pendingInvestigations = new Map<string, PendingInvestigation>();
-const CASE_KEY = "kgcs_selected_case:";
-const TIME_RANGE_KEY = "kgcs_time_range_investigation:";
-const TIME_RANGE_STORE_KEY = "kgcs_time_range_investigations";
+const CASE_KEY = "cskg_selected_case:";
+const TIME_RANGE_KEY = "cskg_time_range_investigation:";
+const TIME_RANGE_STORE_KEY = "cskg_time_range_investigations";
 const MAX_PERSISTED_TIME_RANGE_INVESTIGATIONS = 20;
 
 export interface PreparedTimeRangeInvestigation {

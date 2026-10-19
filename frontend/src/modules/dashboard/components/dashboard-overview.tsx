@@ -27,10 +27,10 @@ import type { InvestigationProgressEvent } from "@/api";
 
 const historySubscribe = (callback: () => void) => {
   window.addEventListener("storage", callback);
-  window.addEventListener("kgcs-investigation-history-change", callback);
+  window.addEventListener("cskg-investigation-history-change", callback);
   return () => {
     window.removeEventListener("storage", callback);
-    window.removeEventListener("kgcs-investigation-history-change", callback);
+    window.removeEventListener("cskg-investigation-history-change", callback);
   };
 };
 
