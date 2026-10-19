@@ -5,6 +5,32 @@ const EVENT_STREAM_TIMEOUT_MS = 660_000;
 const requestHeadersToForward = ["accept", "content-type"] as const;
 const responseHeadersToForward = ["cache-control", "content-disposition", "content-type"] as const;
 
+function streamSseWithPreamble(body: ReadableStream<Uint8Array> | null): ReadableStream<Uint8Array> | null {
+  if (!body) return null;
+  const reader = body.getReader();
+  const encoder = new TextEncoder();
+
+  // Keep EventSource connected while the backend waits for the next turn.
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      controller.enqueue(encoder.encode(": proxy-connected\n\n"));
+      try {
+        while (true) {
+          const next = await reader.read();
+          if (next.done) break;
+          controller.enqueue(next.value);
+        }
+        controller.close();
+      } catch (reason) {
+        controller.error(reason);
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
+}
+
 function getBackendUrl(): URL {
   const backend = new URL(process.env.INVESTIGATION_API_URL || DEFAULT_BACKEND_URL);
   if (!["http:", "https:"].includes(backend.protocol)) {
@@ -64,7 +90,8 @@ export async function proxyBackendRequest(request: Request, path: string[]): Pro
       signal: AbortSignal.timeout(path.at(-1) === "events" ? EVENT_STREAM_TIMEOUT_MS : REQUEST_TIMEOUT_MS),
     });
 
-    return new Response(upstream.body, {
+    const responseBody = path.at(-1) === "events" ? streamSseWithPreamble(upstream.body) : upstream.body;
+    return new Response(responseBody, {
       status: upstream.status,
       statusText: upstream.statusText,
       headers: buildResponseHeaders(upstream),

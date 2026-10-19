@@ -135,7 +135,7 @@ function toProgressEvents(event: InvestigationServerEvent): InvestigationProgres
 export function openInvestigationEventStream(
   caseId: string,
   onEvent: (event: InvestigationProgressEvent) => void,
-  readyTimeoutMs = 1000,
+  readyTimeoutMs = 5000,
 ): InvestigationEventStream {
   if (typeof window === "undefined" || typeof EventSource === "undefined") {
     return { ready: Promise.resolve(false), close: () => undefined };
