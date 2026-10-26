@@ -8,6 +8,7 @@ unit-testable without Neo4j.
 from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+import os
 
 _RESOLVE_ALERTS_CYPHER = """
 MATCH (a:Alert) WHERE a.id IN $ids
@@ -16,7 +17,8 @@ RETURN a.id AS id, a.timestamp AS timestamp, head(collect(h.id)) AS host
 """
 
 
-def fetch_capped(query: str, params: Dict[str, Any], cap: int, graph: Any = None) -> Tuple[List[dict], bool]:
+def fetch_capped(query: str, params: Dict[str, Any], cap: int, graph: Any = None,
+                 timeout: Optional[float] = None) -> Tuple[List[dict], bool]:
     """Runs a read query and returns at most `cap` rows plus whether more
     existed. Rows are streamed and the remainder discarded server-side, so
     a broad query cannot pull an unbounded result into memory -- and,
@@ -35,10 +37,11 @@ def fetch_capped(query: str, params: Dict[str, Any], cap: int, graph: Any = None
         rows = graph.query(query, params)
         return rows[:cap], len(rows) > cap
     from neo4j import Query
+    query_timeout = timeout if timeout is not None else float(os.environ.get("CYPHER_QUERY_TIMEOUT_SECONDS", "120"))
     rows: List[dict] = []
     truncated = False
     with driver.session(database=database) as session:
-        result = session.run(Query(text=query, timeout=getattr(graph, "timeout", None)), params)
+        result = session.run(Query(text=query, timeout=query_timeout), params)
         for record in result:
             if len(rows) >= cap:
                 truncated = True

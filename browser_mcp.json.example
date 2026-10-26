@@ -1,8 +1,11 @@
 {
   "mcpServers": {
     "rdf_explorer": {
-      "command": "C:\\path\\to\\venv\\Scripts\\python.exe",
-      "args": ["C:\\path\\to\\server.py", "--triple-file", "your_file.ttl"]
+      "command": "${CURRENT_PYTHON}",
+      "args": [
+        "${PROJECT_ROOT}/mcp-cskg-rdf/src/mcp-cskg-rdf/server.py",
+        "--sparql-endpoint", "https://w3id.org/sepses/sparql"
+      ]
     }
   }
 }

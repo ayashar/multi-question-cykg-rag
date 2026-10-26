@@ -77,6 +77,7 @@ import asyncio
 import logging
 import os
 import time
+from contextvars import copy_context
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeoutError
 from langchain_core.messages import AIMessage
 from langgraph.graph import StateGraph, END
@@ -119,6 +120,9 @@ grounding_check_logger = logging.getLogger("agent.grounding_check")
 # 37/11-minute MCP SPARQL hangs (socket.setdefaulttimeout in
 # mcp-cskg-rdf/server.py).
 NODE_CALL_TIMEOUT_SECONDS = int(os.environ.get("NODE_CALL_TIMEOUT_SECONDS", "60"))
+CSKG_NODE_CALL_TIMEOUT_SECONDS = int(os.environ.get("CSKG_NODE_CALL_TIMEOUT_SECONDS", "120"))
+CYPHER_NODE_CALL_TIMEOUT_SECONDS = int(os.environ.get("CYPHER_NODE_CALL_TIMEOUT_SECONDS", "180"))
+CYPHER_MAX_CONCURRENCY = max(1, int(os.environ.get("CYPHER_MAX_CONCURRENCY", "2")))
 _retrieval_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="retrieval-timeout")
 
 # How many past turns' retrieved evidence dispatch_retrieval_node keeps
@@ -150,7 +154,7 @@ def _window_question_results(results: list, current_turn: int) -> list:
 
 
 def _call_with_timeout(fn, *args, timeout: int = NODE_CALL_TIMEOUT_SECONDS, **kwargs):
-    future = _retrieval_executor.submit(fn, *args, **kwargs)
+    future = _retrieval_executor.submit(copy_context().run, fn, *args, **kwargs)
     try:
         return future.result(timeout=timeout)
     except _FutureTimeoutError:
@@ -207,7 +211,9 @@ def _describe_failure(source: str, exc: BaseException, attempts: int, seconds: f
     empty string, which is how the pilot's CSKG outage ended up logged as
     "failed after 2 attempt(s): " with nothing after the colon."""
     if isinstance(exc, (asyncio.TimeoutError, TimeoutError)) and not str(exc):
-        message = f"no response within {NODE_CALL_TIMEOUT_SECONDS}s"
+        limit = {'cskg': CSKG_NODE_CALL_TIMEOUT_SECONDS,
+                 'cypher': CYPHER_NODE_CALL_TIMEOUT_SECONDS}.get(source, NODE_CALL_TIMEOUT_SECONDS)
+        message = f"no response within {limit}s"
     else:
         message = str(exc) or "no message"
     return {"source": source, "error_type": type(exc).__name__, "message": message,
@@ -301,7 +307,7 @@ def guardrails_node(state: AgentState):
 
     question = state['question']
     alert_context = _render_alert_context(state.get('alert'))
-    case_context = state.get('case_context') or "N/A"
+    case_context = (state.get('case_context') or "N/A") + (state.get('related_findings_context') or "")
     conversation_context = _render_conversation_context(messages)
     prior_evidence_summary = _render_prior_evidence(state)
     guardrails_logger.info(f"invoked -- question={question!r}")
@@ -383,9 +389,9 @@ def question_generation_node(state: AgentState):
         return {}
 
     alert_summary = state['original_question']
-    case_context = state.get('case_context') or "N/A"
+    case_context = (state.get('case_context') or "N/A") + (state.get('related_findings_context') or "")
     conversation_context = _render_conversation_context(state.get('messages') or [])
-    question_generation_logger.info(f"invoked (mode={mode}, tier={'full' if mode == 'full_hypothesis' else 'fast'})")
+    question_generation_logger.info(f"invoked (mode={mode}, tier={'full' if mode in ('full_hypothesis', 'single_interpretation') else 'fast'})")
     result = generate_questions(alert_summary, case_context=case_context, conversation_context=conversation_context, mode=mode)
     questions = [q.model_dump() for q in result.questions]
     question_generation_logger.info(
@@ -398,7 +404,7 @@ def question_generation_node(state: AgentState):
         )
 
     mitigation_q = _guaranteed_mitigation_question(state)
-    if mitigation_q:
+    if mitigation_q and mode != "single_interpretation":
         questions.append(mitigation_q)
         question_generation_logger.info(f"  - GUARANTEED: question={mitigation_q['question']!r} source=cskg")
 
@@ -440,14 +446,18 @@ async def dispatch_retrieval_node(state: AgentState):
         if source == "vector":
             return await asyncio.to_thread(_call_with_timeout, query_vector_search, q_text, query_timestamp, case_scope)
         elif source == "cypher":
-            cypher_result = await asyncio.to_thread(_call_with_timeout, query_cypher, q_text, query_timestamp, case_scope)
+            async with cypher_slots:
+                cypher_result = await asyncio.to_thread(
+                    _call_with_timeout, query_cypher, q_text, query_timestamp, case_scope,
+                    timeout=CYPHER_NODE_CALL_TIMEOUT_SECONDS)
             return cypher_result.get("context", [])
         elif source == "cskg":
-            return await asyncio.wait_for(run_mcp_agent(q_text), timeout=NODE_CALL_TIMEOUT_SECONDS)
+            return await asyncio.wait_for(run_mcp_agent(q_text), timeout=CSKG_NODE_CALL_TIMEOUT_SECONDS)
         else:
             return f"Unknown source tag '{source}' for this question."
 
     _MAX_RETRIEVAL_ATTEMPTS = 2  # 1 bounded retry, same bound as grounding_check's synthesis retry elsewhere in this graph
+    cypher_slots = asyncio.Semaphore(CYPHER_MAX_CONCURRENCY)
 
     async def run_one(gq: dict) -> dict:
         """Retries only an actual retrieval *failure* (an exception --
@@ -466,14 +476,23 @@ async def dispatch_retrieval_node(state: AgentState):
         q_text = gq["question"]
         source = gq["source"]
         context, failure, started = None, None, time.monotonic()
-        for attempt in range(1, _MAX_RETRIEVAL_ATTEMPTS + 1):
+        max_attempts = 1 if source == "cskg" else _MAX_RETRIEVAL_ATTEMPTS
+        for attempt in range(1, max_attempts + 1):
             try:
                 context = await _retrieve_once(source, q_text)
                 failure = None
                 break
             except Exception as e:
                 failure = _describe_failure(source, e, attempt, time.monotonic() - started)
-                if attempt < _MAX_RETRIEVAL_ATTEMPTS:
+                # A timed-out worker thread may still be running. Retrying it
+                # here can overlap the same expensive request and amplify load.
+                retryable = not isinstance(e, TimeoutError)
+                if source == "cypher":
+                    # A lost routing connection is worth one retry. Do not
+                    # rerun a slow/failed database query and multiply load.
+                    from neo4j.exceptions import ServiceUnavailable
+                    retryable = isinstance(e, ServiceUnavailable)
+                if attempt < max_attempts and retryable:
                     dispatch_retrieval_logger.warning(
                         f"({source}) {q_text!r} failed on attempt {attempt}, retrying once: "
                         f"{failure['error_type']}: {failure['message']}"
@@ -510,7 +529,7 @@ async def dispatch_retrieval_node(state: AgentState):
             context = context["rendered"]
         dispatch_retrieval_logger.info(f"output: ({source}) {q_text!r} -> {str(context)[:300]!r}")
         return {**gq, "context": context, "evidence": evidence,
-                "retrieval": {"status": "ok", "seconds": round(time.monotonic() - started, 1)}}
+                "retrieval": {"status": "ok", "attempts": attempt, "seconds": round(time.monotonic() - started, 1)}}
 
     results = list(await asyncio.gather(*(run_one(gq) for gq in questions)))
     for r in results:
@@ -767,13 +786,13 @@ def synthesize_node(state: AgentState):
     hypothesis_summary = _render_hypothesis_summary(state.get('question_results') or [])
     messages = state.get('messages') or []
     turn_no = _current_turn_number(messages)
-    case_context = state.get('case_context') or "N/A"
+    case_context = (state.get('case_context') or "N/A") + (state.get('related_findings_context') or "")
     conversation_context = _render_conversation_context(messages)
     mode = state.get('investigation_mode') or "full_hypothesis"
-    chain = synthesis_chain if mode == "full_hypothesis" else synthesis_chain_fast
+    chain = synthesis_chain if mode in ("full_hypothesis", "single_interpretation") else synthesis_chain_fast
     failures = state.get('dependency_failures') or []
     source_status = state.get('source_status') or {}
-    synthesizer_logger.info(f"invoked (mode={mode}, tier={'full' if mode == 'full_hypothesis' else 'fast'})")
+    synthesizer_logger.info(f"invoked (mode={mode}, tier={'full' if mode in ('full_hypothesis', 'single_interpretation') else 'fast'})")
 
     if not state.get('mcp_rdf_context') and log_cypher == "Not applicable for this query." and log_vector == "Not applicable for this query.":
         if failures:
@@ -859,7 +878,9 @@ def synthesize_node(state: AgentState):
             + int(any(r["source"] == "vector" and _has_case_evidence(r) for r in results))
             + int(_cskg_has_data(state))
         )
-    report = _cap_confidence(report, richness)
+    raw_draft = report.model_dump()
+    if state.get('enforcement_policy', 'complete') != 'diagnostic_only':
+        report = _cap_confidence(report, richness)
 
     synthesizer_logger.info(
         f"output: final_answer={report.final_answer!r} confidence={report.confidence} "
@@ -877,6 +898,8 @@ def synthesize_node(state: AgentState):
     return {
         "answer": report.final_answer,
         "synthesized_report": _annotate_report(report.model_dump(), state),
+        "raw_synthesis_draft": raw_draft,
+        "evidence_richness": richness,
         "grounding_retry_count": retry_count,
         "known_mitre_techniques": known_techniques,
         # Same id every time this node runs within one turn (including a
@@ -995,6 +1018,10 @@ def grounding_check_node(state: AgentState):
     result["claim_verifier"] = verifier
     result["summary"] = summarize_claims(result)
 
+    if state.get('enforcement_policy', 'complete') == 'diagnostic_only':
+        result.update(final=True, enforcement='diagnostic_only', adjustments={})
+        return {"grounding_result": result}
+
     if result["valid"]:
         grounding_check_logger.info(
             f"output: valid=True grounded={result['grounded']} checked_entities={result['checked_entities']} "
@@ -1069,6 +1096,8 @@ def decide_after_guardrails(state: AgentState):
 
 # 2. Decision after Grounding Check
 def decide_after_grounding(state: AgentState):
+    if state.get('enforcement_policy', 'complete') == 'diagnostic_only':
+        return END
     result = state.get('grounding_result') or {}
     if result.get('valid', result.get('grounded', True)):
         grounding_check_logger.info("routing: report validated -> ending execution")

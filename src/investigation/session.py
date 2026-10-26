@@ -6,7 +6,7 @@ call -- the "initial investigation, then chatroom" half of the split
 described in src/investigation/__init__.py's package (see PROTOTYPE.md).
 
 Compiles the graph a *second* time with a checkpointer
-(`workflow.compile(checkpointer=MemorySaver())`), importing the uncompiled
+(`workflow.compile(checkpointer=FileCheckpointSaver(...))`), importing the uncompiled
 `workflow` StateGraph builder from src.graph.workflow rather than its
 already-compiled `app`. This is deliberate: src/run.py and eval/run_eval.py
 keep calling the original uncheckpointed `app` exactly as before (no
@@ -15,10 +15,14 @@ and can't break either of them -- LangGraph raises if you invoke a
 checkpointed graph without a thread_id, which would otherwise break every
 existing call site.
 
-State persistence is in-process only (MemorySaver) -- lost on restart, by
-design for a prototype. The audit log is reloaded on API startup
-(load_transcripts) so past turns stay readable, but a reloaded case cannot be
-continued: its checkpoint is gone (CaseNotResumable): this is a single-process FastAPI service (see
+Resuming a conversation: the checkpointer is a FileCheckpointSaver (see
+src/investigation/checkpoints.py). After every turn the case's latest
+pipeline state is written to data/checkpoints/<case_id>.json, and the Case
+itself to data/checkpoints/<case_id>.case.json. The audit log is reloaded on
+API startup (load_transcripts) so past turns stay readable, and a follow-up
+on a reloaded case picks its pipeline state back up from those files. Only
+cases whose state was never saved (investigated before this existed) still
+raise CaseNotResumable. This is a single-process FastAPI service (see
 api.py), not a durable multi-instance backend. Each turn is additionally
 appended to data/investigations.jsonl as a persistent audit trail, mirroring
 the pattern src/ingestion/trigger.py used for auto_trigger_log.jsonl.
@@ -31,11 +35,11 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from langgraph.checkpoint.memory import MemorySaver
 from pydantic import BaseModel, Field
 
 from src.graph.workflow import workflow
 from src.ingestion.schema import Alert
+from src.investigation.checkpoints import FileCheckpointSaver, safe_filename
 from src.investigation.events import bus, current_case, install_log_handler
 from src.investigation.trace import STEP_LABELS, build_trace, summarize_update
 from src.investigation.clustering import Case
@@ -48,23 +52,44 @@ logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 LOG_PATH = DATA_DIR / "investigations.jsonl"
+CHECKPOINT_DIR = DATA_DIR / "checkpoints"
 
 INITIAL_DIRECTIVE = (
     "Investigate the activity described in this case. Identify related MITRE ATT&CK "
     "techniques, provide an initial diagnosis of the situation, and recommend mitigation actions."
 )
 
-checkpointed_app = workflow.compile(checkpointer=MemorySaver())
+checkpointer = FileCheckpointSaver(CHECKPOINT_DIR)
+checkpointed_app = workflow.compile(checkpointer=checkpointer)
 
-# In-memory only -- see module docstring. Keyed by case_id (== LangGraph thread_id).
+# Keyed by case_id (== LangGraph thread_id). Rebuilt after a restart from the
+# audit log (_transcripts) and data/checkpoints/ (_case_by_id, lazily).
 _transcripts: Dict[str, List["TurnRecord"]] = {}
 _case_by_id: Dict[str, Case] = {}
-_restored: set = set()   # cases reloaded from the audit log: readable, not resumable
+_restored: set = set()   # cases reloaded from the audit log after a restart
 
 
 class CaseNotResumable(Exception):
-    """The case's turns were reloaded from the audit log after a restart; the
-    pipeline's checkpoint for it no longer exists."""
+    """The case's turns were reloaded from the audit log after a restart and
+    no saved pipeline state exists for it (it predates saved checkpoints, or
+    its checkpoint file was removed)."""
+
+
+class InvestigationSummary(BaseModel):
+    """One conversation, for a UI's list of past investigations."""
+    case_id: str
+    turn_count: int
+    first_question: str
+    last_question: str
+    last_answer_preview: Optional[str] = None
+    last_timestamp: str
+    recommended_priority: Optional[str] = None
+    hosts: List[str] = Field(default_factory=list)
+    alert_count: Optional[int] = None
+    # Whether POST /investigations/{case_id}/chat will accept a follow-up.
+    resumable: bool
+    # A turn is in progress right now (follow GET .../events).
+    running: bool = False
 
 
 class TurnRecord(BaseModel):
@@ -118,6 +143,67 @@ def load_transcripts() -> int:
     for turns in _transcripts.values():
         turns.sort(key=lambda t: t.turn_index)
     return loaded
+
+
+def _case_path(case_id: str) -> Path:
+    return CHECKPOINT_DIR / f"{safe_filename(case_id)}.case.json"
+
+
+def _save_case(case: Case) -> None:
+    try:
+        CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+        path = _case_path(case.case_id)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(case.model_dump_json())
+        tmp.replace(path)
+    except Exception:
+        logger.warning("[investigation] could not save case %s", case.case_id, exc_info=True)
+
+
+def _load_case(case_id: str) -> Optional[Case]:
+    path = _case_path(case_id)
+    if not path.exists():
+        return None
+    try:
+        case = Case.model_validate_json(path.read_text())
+    except Exception:
+        logger.warning("[investigation] could not read %s", path, exc_info=True)
+        return None
+    return case if case.case_id == case_id else None
+
+
+def _persist_state(case_id: str) -> None:
+    """Save the case's latest pipeline state so the conversation can be
+    resumed after a restart. A failure here never fails the turn itself."""
+    try:
+        checkpointer.persist(case_id)
+    except Exception:
+        logger.warning("[investigation] could not save pipeline state for %s", case_id, exc_info=True)
+
+
+def is_resumable(case_id: str) -> bool:
+    if case_id not in _transcripts:
+        return False
+    if case_id not in _restored or case_id in _case_by_id:
+        return True
+    return checkpointer.has_checkpoint(case_id)
+
+
+def _ensure_resumable(case_id: str) -> None:
+    """For a case reloaded after a restart: bring back its Case and check its
+    pipeline state was saved. Raises CaseNotResumable otherwise."""
+    if case_id not in _restored or case_id in _case_by_id:
+        return
+    if not checkpointer.restore(case_id):
+        raise CaseNotResumable(
+            f"Case {case_id} was reloaded from the audit log after a restart and has no saved pipeline "
+            f"state (it was investigated before conversations were saved), so it cannot take follow-ups. "
+            f"Its turns remain readable.")
+    case = _load_case(case_id)
+    if case is not None:
+        _case_by_id[case_id] = case
+    _restored.discard(case_id)
+    logger.info("[investigation] case=%s resumed from saved state", case_id)
 
 
 def _safe_trace(result: dict, log: list) -> Optional[dict]:
@@ -175,6 +261,7 @@ async def _run_turn(case_id: str, question: str, extra_state: dict) -> TurnRecor
     finally:
         current_case.reset(token)
     latency = time.monotonic() - start
+    _persist_state(case_id)
 
     report = result.get("synthesized_report") or {}
     record = TurnRecord(
@@ -242,11 +329,19 @@ async def start_investigation(case: Case, alerts: List[Alert]) -> TurnRecord:
     """Idempotent: a case that's already been opened returns its existing
     successful initial turn instead of re-running the pipeline (and spending
     another round of LLM calls). Failed initial attempts can be retried and
-    remain in the transcript/audit log. Use ask_followup for continued Q&A."""
-    for record in _transcripts.get(case.case_id, []):
-        if record.question == INITIAL_DIRECTIVE and record.error is None:
-            return record
+    remain in the transcript/audit log. Use ask_followup for continued Q&A
+    on an already-started case."""
+    if case.case_id in _transcripts:
+        # Re-opening a case after a restart hands us its Case again; keep it
+        # so follow-ups anchor to the case's own time and can store findings.
+        if case.case_id not in _case_by_id:
+            _case_by_id[case.case_id] = case
+            _save_case(case)
+        for record in _transcripts[case.case_id]:
+            if record.question == INITIAL_DIRECTIVE and record.error is None:
+                return record
     _case_by_id[case.case_id] = case
+    _save_case(case)
     case_context = build_case_context(case, alerts)
     return await _run_turn(case.case_id, INITIAL_DIRECTIVE, {
         "case_context": case_context,
@@ -279,12 +374,8 @@ async def start_investigation(case: Case, alerts: List[Alert]) -> TurnRecord:
 async def ask_followup(case_id: str, message: str) -> TurnRecord:
     if case_id not in _transcripts:
         raise ValueError(f"No investigation started for case {case_id} yet -- call start_investigation first.")
-    if case_id in _restored and case_id not in _case_by_id:
-        raise CaseNotResumable(
-            f"Case {case_id} was reloaded from the audit log after a restart; its pipeline state is gone, "
-            f"so it cannot take follow-ups. Its turns remain readable.")
+    _ensure_resumable(case_id)
     case = _case_by_id.get(case_id)
-    query_timestamp = case.last_seen if case else now_iso()
     # case_context is deliberately NOT resent: it's a non-reducer state
     # field, so LangGraph's checkpointer keeps turn 1's value automatically
     # when a later turn's partial state update omits it. skip_guardrails,
@@ -293,8 +384,43 @@ async def ask_followup(case_id: str, message: str) -> TurnRecord:
     # it True, and being a non-reducer field it would otherwise stay True
     # on every later turn too, silently skipping guardrails' investigation_
     # mode routing (the whole point of this method) forever after turn 1.
-    return await _run_turn(case_id, message, {"query_timestamp": query_timestamp, "skip_guardrails": False})
+    extra = {"skip_guardrails": False}
+    if case is not None:
+        extra["query_timestamp"] = case.last_seen
+    elif not checkpointer.has_checkpoint(case_id):
+        extra["query_timestamp"] = now_iso()
+    # (otherwise the saved state already holds the case's query_timestamp)
+    return await _run_turn(case_id, message, extra)
 
 
 def get_transcript(case_id: str) -> List[TurnRecord]:
     return _transcripts.get(case_id, [])
+
+
+def summarize(case_id: str) -> Optional[InvestigationSummary]:
+    turns = _transcripts.get(case_id)
+    if not turns:
+        return None
+    first, last = turns[0], turns[-1]
+    case = _case_by_id.get(case_id) or _load_case(case_id)
+    preview = (last.answer or "")[:280] or None
+    return InvestigationSummary(
+        case_id=case_id,
+        turn_count=len(turns),
+        first_question=first.question,
+        last_question=last.question,
+        last_answer_preview=preview,
+        last_timestamp=last.timestamp,
+        recommended_priority=next((t.recommended_priority for t in reversed(turns) if t.recommended_priority), None),
+        hosts=case.hosts if case else [],
+        alert_count=case.alert_count if case else None,
+        resumable=is_resumable(case_id),
+        running=bus.is_running(case_id),
+    )
+
+
+def list_investigations() -> List[InvestigationSummary]:
+    """Every conversation known to this process (including ones reloaded
+    from the audit log), most recently active first."""
+    summaries = [s for s in (summarize(cid) for cid in list(_transcripts)) if s is not None]
+    return sorted(summaries, key=lambda s: s.last_timestamp, reverse=True)

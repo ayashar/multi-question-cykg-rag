@@ -37,6 +37,12 @@ class AgentState(TypedDict):
     synthesized_report: Optional[dict]
     grounding_result: Optional[dict]
     grounding_retry_count: int
+    # Evaluation policy is explicit per invocation; production defaults to complete.
+    enforcement_policy: Optional[str]
+    raw_synthesis_draft: Optional[dict]
+    evidence_richness: Optional[int]
+    # Earlier model outputs are prompt context, never citation-validation evidence.
+    related_findings_context: Optional[str]
 
     # temporal weighting: the timestamp retrieval should be weighted against
     # (the triggering alert's timestamp for auto-triggered queries, "now"
