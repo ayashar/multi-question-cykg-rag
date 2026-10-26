@@ -26,6 +26,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 from src.config.settings import llm
+from src.config.structured import structured_model
 
 
 class GuardrailsOutput(BaseModel):
@@ -36,20 +37,11 @@ class GuardrailsOutput(BaseModel):
     investigation_mode: Literal["full_hypothesis", "direct_question", "answer_from_context"] = Field(
         description="Only meaningful for a follow-up question in an ongoing investigation chat -- "
         "i.e. when the conversation history below is non-empty. Decide how much NEW investigation "
-        "this specific follow-up needs, using the 'Evidence already gathered' section below: "
+        "this specific follow-up needs, using the 'Evidence already gathered' section below. "
         "'answer_from_context' if that evidence already contains what's needed to answer this "
-        "follow-up directly, no new retrieval required. Otherwise, the choice between "
-        "'direct_question' and 'full_hypothesis' turns on HOW MANY competing explanations the "
-        "follow-up implies, not on how narrow or specific its wording sounds: 'direct_question' "
-        "ONLY if it has exactly one plausible answer shape -- a single lookup, a count, a specific "
-        "fact (e.g. 'how many alerts came from host X', 'what technique is T1110'); "
-        "'full_hypothesis' if it names or implies MORE THAN ONE competing explanation that would "
-        "each need different discriminating evidence, even when it's one sentence about one named "
-        "entity -- e.g. 'is host X the attack source, a victim, or just a noisy host?' is "
-        "full_hypothesis (three competing explanations), NOT direct_question, despite naming a "
-        "single specific host. Picking 'direct_question' for a multi-hypothesis question silently "
-        "investigates only one of the explanations and drops the others entirely, rather than "
-        "ruling them out -- when genuinely unsure between the two, prefer 'full_hypothesis'. "
+        "follow-up directly, no new retrieval required. Otherwise always choose 'direct_question' "
+        "for a follow-up: produce one focused retrieval question even if the wording mentions "
+        "several possible explanations. Follow-up chat must never launch a full hypothesis sweep. "
         "Always 'full_hypothesis' when there is no conversation history yet (first turn, or a "
         "manually-typed/single-shot question with nothing to reuse)."
     )
@@ -78,16 +70,10 @@ guardrails_prompt = ChatPromptTemplate.from_messages([
            question), always set investigation_mode to 'full_hypothesis' -- there is no prior
            evidence to reuse yet.
 
-           The 'direct_question' vs. 'full_hypothesis' choice specifically hinges on how many
-           competing explanations the follow-up implies, not on how narrow or specific it sounds.
-           A question naming one specific entity can still pose multiple hypotheses about it: "is
-           host X the attack source, a victim, or just noisy?" names one host but implies three
-           competing explanations, each needing different evidence to discriminate between --
-           that's 'full_hypothesis', not 'direct_question', even though it reads as one narrow
-           sentence about one host. Reserve 'direct_question' for follow-ups with exactly one
-           plausible answer shape (a count, a lookup, a single fact). Collapsing a multi-hypothesis
-           follow-up into 'direct_question' silently investigates only one of the explanations and
-           never even checks the others -- when unsure, prefer 'full_hypothesis'.
+           Follow-up chat is intentionally focused and cost-bounded. If prior evidence is enough,
+           choose 'answer_from_context'; otherwise choose 'direct_question' and retrieve only the
+           evidence needed for the latest question. Never choose 'full_hypothesis' when there is
+           conversation history.
 
         Only allow relevant questions to pass.
         """
@@ -108,7 +94,7 @@ guardrails_prompt = ChatPromptTemplate.from_messages([
     ),
 ])
 
-guardrails_chain = guardrails_prompt | llm.with_structured_output(GuardrailsOutput)
+guardrails_chain = guardrails_prompt | structured_model(llm, GuardrailsOutput)
 
 
 def _render_alert_context(alert: Optional[dict]) -> str:

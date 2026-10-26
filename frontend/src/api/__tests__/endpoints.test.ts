@@ -8,6 +8,7 @@ import {
   investigateTimeRange,
   sendChatMessage,
   getChatTranscript,
+  getTurnTrace,
   getIngestionConfig,
   updateIngestionConfig,
   getIngestionStatus,
@@ -421,6 +422,27 @@ describe("API Client Suite", () => {
       assert.equal(lastCall.options?.method, "GET");
       assert.equal(res.length, 1);
       assert.equal(res[0].turn_index, 1);
+    });
+
+    it("loads a single investigation trace on demand", async () => {
+      setupMockFetch({
+        mode: "case",
+        hypotheses: [],
+        retrievals: [],
+        claims: [],
+        alerts: {},
+        validation: { valid: true },
+        log: [{ agent: "synthesizer", level: "INFO", message: "Report drafted" }],
+      });
+
+      const res = await getTurnTrace("c-100", 1);
+
+      assert.ok(lastCall);
+      const url = new URL(lastCall.url);
+      assert.equal(url.pathname, "/investigations/c-100/turns/1/trace");
+      assert.equal(lastCall.options?.method, "GET");
+      assert.equal(res.validation?.valid, true);
+      assert.equal(res.log?.[0].message, "Report drafted");
     });
 
     it("getIngestionConfig parses IngestionConfig", async () => {

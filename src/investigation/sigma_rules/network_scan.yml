@@ -1,17 +1,31 @@
 title: Network/Port Scan Detected
 id: ait-network-scan-001
 status: experimental
-description: Reconnaissance activity -- a source probing multiple ports/services.
+description: >
+  Reconnaissance activity -- a source probing multiple ports/services.
+  Originally only checked rule_description; checking against real AIT-ADS
+  data showed most of the actual Nmap evidence lives in full_log (the
+  scripted Nmap NSE user-agent string on web requests, e.g. "Mozilla/5.0
+  (compatible; Nmap Scripting Engine; ...)") or in rule_groups (natively
+  tagged 'web_scan'/'recon' on some Wazuh web-log alerts) -- neither of
+  which the rule_description-only version ever saw, so it caught only 5
+  of what's actually a much larger body of scan evidence in that sample.
 logsource:
     category: network
     product: suricata
 detection:
-    selection:
+    selection_desc:
         rule_description|contains:
             - 'ET SCAN'
             - 'port scan'
             - 'Nmap'
-    condition: selection
+    selection_log:
+        full_log|contains: 'Nmap'
+    selection_groups:
+        rule_groups|contains:
+            - 'web_scan'
+            - 'recon'
+    condition: selection_desc or selection_log or selection_groups
 level: medium
 tags:
     - attack.t1046

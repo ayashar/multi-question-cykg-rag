@@ -21,8 +21,8 @@ interface SourceConfigurationProps {
   observedData?: ObservedIngestionData;
 }
 
-const STORAGE_KEY = "kgcs_ingestion_config_preview";
-const STORAGE_EVENT = "kgcs-ingestion-config-change";
+const STORAGE_KEY = "cskg_ingestion_config_preview";
+const STORAGE_EVENT = "cskg-ingestion-config-change";
 
 const DEFAULT_CONFIG: ConfigurationValues = {
   alertsPath: "data/alerts.jsonl",

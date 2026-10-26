@@ -24,6 +24,30 @@ const mainNavItems: NavItem[] = [
   { label: "Past Investigation", href: "/past-investigation", icon: Info },
 ];
 
+function CskgLogo() {
+  return (
+    <svg
+      aria-label="CSKG logo"
+      className="w-11 h-11 shrink-0"
+      role="img"
+      viewBox="0 0 44 44"
+    >
+      <rect width="44" height="44" rx="12" fill="#442b54" />
+      <path
+        d="M14 14 30 14 22 29 14 14Z"
+        fill="none"
+        stroke="#d6c6e1"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+      />
+      <circle cx="14" cy="14" r="3.5" fill="#fff" />
+      <circle cx="30" cy="14" r="3.5" fill="#fff" />
+      <circle cx="22" cy="29" r="3.5" fill="#fff" />
+    </svg>
+  );
+}
+
 export default function Sidebar() {
   const pathname = usePathname();
 
@@ -31,9 +55,9 @@ export default function Sidebar() {
     <aside className="w-16 min-w-16 lg:w-[360px] lg:min-w-[360px] h-screen sticky top-0 flex flex-col justify-between border-r-2 border-neutral-300 bg-background select-none z-20">
       <div className="flex flex-col">
         <div className="px-3 lg:px-5 py-5 flex items-center gap-3">
-          <div className="w-11 h-11 rounded-[4px] bg-neutral-300 shrink-0" />
+          <CskgLogo />
           <span className="hidden lg:block font-h7 text-neutral-1000 font-medium">
-            ChatBot KGCS
+            ChatBot CSKG
           </span>
         </div>
 

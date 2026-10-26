@@ -18,11 +18,13 @@ import { getApiConfig, getCaseLookback, ApiClientError, type TurnRecord } from "
 export interface BackendUnreachableErrorProps
   extends React.HTMLAttributes<HTMLDivElement> {
   endpointUrl?: string;
+  detail?: string;
   onRetry?: () => void;
 }
 
 export function BackendUnreachableError({
   endpointUrl,
+  detail,
   onRetry,
   className,
   ...props
@@ -50,6 +52,7 @@ export function BackendUnreachableError({
         <span className="text-neutral-600 block mb-1 font-semibold">Target Endpoint:</span>
         {url}
       </div>
+      {detail && <p className="mb-6 rounded-[3px] border border-yellow-200 bg-yellow-100/50 p-3 text-left font-b3 text-yellow-900">{detail}</p>}
       <div className="flex justify-center gap-3">
         {onRetry && (
           <button
@@ -308,6 +311,10 @@ export function getErrorCategory(error: unknown): ErrorCategory {
   if (error instanceof ApiClientError) {
     if (error.status === 401) return "401";
     if (error.status === 404) return "404";
+    if ((error.status === 502 && /investigation API is unavailable/i.test(error.detail))
+      || (error.status === 504 && /investigation API timed out/i.test(error.detail))) {
+      return "unreachable";
+    }
     if (error.status >= 500) return "500";
     return "generic";
   }
@@ -395,6 +402,8 @@ export function ApiErrorView({
   if (category === "unreachable") {
     return (
       <BackendUnreachableError
+        endpointUrl={error instanceof ApiClientError ? error.url : undefined}
+        detail={errorDetail}
         onRetry={onRetry}
         className={className}
         {...props}

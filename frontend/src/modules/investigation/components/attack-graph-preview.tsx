@@ -24,6 +24,13 @@ const nodeColors: Record<string, string> = {
   mitre_technique: "border-green-200 bg-green-100 text-green-500",
 };
 
+const graphLegendItems = [
+  { type: "alert", label: "Alert" },
+  { type: "host", label: "Host / IP" },
+  { type: "user", label: "User" },
+  { type: "mitre_technique", label: "MITRE technique" },
+] as const;
+
 const NODE_WIDTH = 288;
 const NODE_HEIGHT = 110;
 const HORIZONTAL_GAP = 170;
@@ -169,6 +176,30 @@ function GraphPlane({ graph, layout }: { graph: CaseAttackGraph; layout: GraphLa
   );
 }
 
+function GraphLegend() {
+  return (
+    <section aria-labelledby="attack-graph-legend" className="rounded-[4px] border border-neutral-300 bg-background p-3">
+      <h3 id="attack-graph-legend" className="font-b3 font-semibold uppercase tracking-wide text-neutral-800">Graph legend</h3>
+      <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-2 font-b3 text-neutral-800">
+        {graphLegendItems.map((item) => (
+          <li key={item.type} className="flex items-center gap-2">
+            <span aria-hidden="true" className={cn("size-4 rounded border-2", nodeColors[item.type])} />
+            <span>{item.label}</span>
+          </li>
+        ))}
+        <li className="flex items-center gap-2">
+          <span aria-hidden="true" className="h-0.5 w-5 bg-neutral-900" />
+          <span>Relationship</span>
+        </li>
+        <li className="flex items-center gap-2">
+          <span aria-hidden="true" className="size-4 rounded border-2 border-red-200 ring-2 ring-red-200 ring-offset-1" />
+          <span>Root cause</span>
+        </li>
+      </ul>
+    </section>
+  );
+}
+
 export function MiniAttackGraph({ graph }: { graph: CaseAttackGraph }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const planeRef = useRef<HTMLDivElement>(null);
@@ -196,18 +227,21 @@ export function MiniAttackGraph({ graph }: { graph: CaseAttackGraph }) {
   }, [positionPreview]);
 
   return (
-    <div
-      ref={viewportRef}
-      role="img"
-      aria-label={`Attack graph preview with ${graph.nodes.length} nodes and ${graph.edges.length} relationships. Open the full graph to explore it.`}
-      className="relative h-[260px] w-full overflow-hidden rounded-[3px] bg-[#606060]"
-    >
-      <div ref={planeRef} className="pointer-events-none absolute left-0 top-0 origin-top-left" style={{ width: layout.width, height: layout.height }}>
-        <GraphPlane graph={graph} layout={layout} />
+    <div className="space-y-3">
+      <div
+        ref={viewportRef}
+        role="img"
+        aria-label={`Attack graph preview with ${graph.nodes.length} nodes and ${graph.edges.length} relationships. Open the full graph to explore it.`}
+        className="relative h-[260px] w-full overflow-hidden rounded-[3px] bg-[#606060]"
+      >
+        <div ref={planeRef} className="pointer-events-none absolute left-0 top-0 origin-top-left" style={{ width: layout.width, height: layout.height }}>
+          <GraphPlane graph={graph} layout={layout} />
+        </div>
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black-600/75 to-transparent px-3 pb-3 pt-10 text-white">
+          <p className="font-b3">Preview · Open the full graph to zoom and move</p>
+        </div>
       </div>
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black-600/75 to-transparent px-3 pb-3 pt-10 text-white">
-        <p className="font-b3">Preview · Open the full graph to zoom and move</p>
-      </div>
+      <GraphLegend />
     </div>
   );
 }
@@ -336,6 +370,7 @@ function InteractiveAttackGraph({ graph }: { graph: CaseAttackGraph }) {
           <span className="font-b3">Drag to move · Scroll to zoom</span>
         </div>
       </div>
+      <GraphLegend />
       <p className="font-b3 text-neutral-800">Keyboard: arrow keys move the graph, +/− zoom, and 0 fits all nodes.</p>
     </div>
   );

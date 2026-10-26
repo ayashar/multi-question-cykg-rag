@@ -46,7 +46,7 @@ test("first discovery survives repeat listings and narrower endpoint overrides",
 });
 
 test("restores the first discovery window from session storage", async () => {
-  const stored = new Map<string, string>([["kgcs_case_lookback_map", JSON.stringify({ "case-restored": 8760 })]]);
+  const stored = new Map<string, string>([["cskg_case_lookback_map", JSON.stringify({ "case-restored": 8760 })]]);
   const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
   const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
   Object.defineProperty(globalThis, "window", { configurable: true, value: {} });
@@ -59,7 +59,7 @@ test("restores the first discovery window from session storage", async () => {
     assert.equal(getCaseLookback("case-restored"), 8760);
     globalThis.fetch = async () => Response.json([exampleCase]);
     await getCases({ lookback_hours: 720 });
-    assert.equal(JSON.parse(stored.get("kgcs_case_lookback_map")!)[exampleCase.case_id], 720);
+    assert.equal(JSON.parse(stored.get("cskg_case_lookback_map")!)[exampleCase.case_id], 720);
   } finally {
     clearLookbackStore();
     if (windowDescriptor) Object.defineProperty(globalThis, "window", windowDescriptor);

@@ -1,10 +1,11 @@
 # src/agents/cypher_agent.py
+import re
 from typing import Optional
 from langchain_core.prompts import PromptTemplate
 from langchain_neo4j.chains.graph_qa.cypher import GraphCypherQAChain
-from langchain_openai import ChatOpenAI
-from src.config.settings import read_only_graph
+from src.config.settings import read_only_graph, llm, fast_llm
 from src.retrieval.temporal import weight_and_sort_records
+from src.retrieval import case_scope as cs
 
 # --- Cypher Generation Prompt Template ---
 # Schema + examples below match src/ingestion/graph_loader.py exactly (the
@@ -45,6 +46,7 @@ Following the instructions below:
         10. **CRITICAL RULE**: When returning the `type()` of a relationship, you MUST give the relationship a variable in the `MATCH` clause. E.g., `MATCH (h:Host)-[r:HAS_ALERT]->(a:Alert) RETURN type(r)`. Do NOT use `type()` on a relationship without a variable.
         11. **CRITICAL RULE**: A `WITH`/`RETURN` clause using `DISTINCT` or an aggregate function (`count()`, `collect()`, etc.) drops every variable not explicitly named in that clause -- a later `ORDER BY` can ONLY reference variables that clause actually returned, never an earlier MATCH variable that fell out of scope. E.g. `MATCH (h:Host)-[:HAS_ALERT]->(a:Alert) RETURN DISTINCT h.id AS hostId ORDER BY a.timestamp` is INVALID (`a` is gone after the DISTINCT); either return `a.timestamp` as an alias and order by that alias, or drop DISTINCT/the aggregate if you need to keep ordering by an unreturned variable.
         12. **CRITICAL RULE**: `MitreTechnique.tactic` is populated ONLY from the original alert's own native tag (most alerts don't have one), and when present it is always one of the ~14 standard MITRE ATT&CK tactic names verbatim (e.g. "Discovery", "Lateral Movement", "Initial Access", "Command and Control") -- it is NEVER a hypothesis's own free-text wording. Words like "scanning", "probing", or "reconnaissance" will NEVER appear in `m.tactic` even for genuinely related alerts, so `WHERE toLower(m.tactic) CONTAINS "scanning"` is guaranteed to return nothing regardless of whether relevant data exists. If the question names a SPECIFIC known technique, filter by `m.id` (e.g. `m.id = "T1046"` or `m.id STARTS WITH "T1046"`) -- that is the reliable, structured identifier. If the question is more open-ended (e.g. "does this look like scanning activity"), do NOT filter MitreTechnique by any guessed tactic text at all -- retrieve the alert's own `title`/`full_log` instead (per the guidance above) and let that content answer it.
+        13. **CRITICAL RULE**: `Alert.timestamp` is a plain STRING property (ISO-8601), not a native Cypher temporal type. Comparing it directly against another ISO-8601 string works fine (e.g. `a.timestamp >= "2022-01-24T00:00:00Z"`), but a relative time window (e.g. "in the last 24 hours") requires converting it first with `datetime(a.timestamp)`. Cypher's `duration` values do NOT have a `.toMillis()` method -- that is a Java/JavaScript API, not Cypher -- so `duration('P1D').toMillis()` is invalid and will fail with a syntax error. Subtract a `duration` directly from a `datetime` instead, e.g. `datetime(a.timestamp) >= datetime() - duration({{hours: 24}})`. Also, this data is historical, not near real wall-clock time: if a "Reference time" is given below (see the question), anchor relative-time phrases like "the last N hours" to THAT timestamp instead of `datetime()` with no arguments -- real wall-clock `datetime()` will never match historical data.
 
 Schema:
 {schema}
@@ -96,15 +98,14 @@ Examples:
     ORDER BY a.timestamp DESC
     LIMIT 5
 
-5.  Question: Give me all activity connected to this alert.
+5.  Question: Give me all activity connected to the alerts on this host.
     Query:
-    MATCH (a:Alert {{id: "alert-123"}})
-    OPTIONAL MATCH (h:Host)-[:HAS_ALERT]->(a)
+    MATCH (h:Host {{id: "webserver01"}})-[:HAS_ALERT]->(a:Alert)
     OPTIONAL MATCH (srcIp:IP)-[:ATTACK_TO]->(a)
     OPTIONAL MATCH (a)-[:CONNECTS_TO]->(dstIp:IP)
     OPTIONAL MATCH (a)-[:TARGETS_USER]->(u:User)
     OPTIONAL MATCH (a)-[:TRIGGERS]->(m:MitreTechnique)
-    RETURN a.title AS title, a.rule_level AS severity, h.id AS host, srcIp.id AS sourceIp,
+    RETURN a.id AS alertId, a.timestamp AS timestamp, a.title AS title, a.rule_level AS severity, h.id AS host, srcIp.id AS sourceIp,
            dstIp.id AS destIp, u.id AS targetUser, collect(DISTINCT m.id) AS techniques
 
 6.  Question: Is there evidence of outbound scanning or probing activity from this IP?
@@ -120,6 +121,21 @@ Examples:
     that might not appear verbatim anywhere. If the volume is large, a light keyword filter on
     `a.title`/`a.full_log` themselves, as above, is fine since those fields do contain real
     descriptive text -- the mistake is filtering `m.tactic` on words that field never contains.)
+
+7.  Question: How many alerts has this host triggered in the last 24 hours, and what were their
+    severity levels? (Reference time for relative time phrases: "2022-01-25T23:58:41Z")
+    Query (WRONG way -- do not do this: `duration('P1D').toMillis()` is not valid Cypher (Duration
+    has no `.toMillis()` method), and real wall-clock `datetime()` would never match this historical
+    data anyway):
+    MATCH (h:Host {{id: "mail"}})-[:HAS_ALERT]->(a:Alert)
+    WHERE a.timestamp >= datetime().epochMillis - duration('P1D').toMillis()
+    RETURN count(a) AS alertCount
+    (Right approach: convert the stored string with `datetime(a.timestamp)`, and anchor "the last 24
+    hours" to the given reference time, not real wall-clock `datetime()`):
+    MATCH (h:Host {{id: "mail"}})-[:HAS_ALERT]->(a:Alert)
+    WHERE datetime(a.timestamp) >= datetime("2022-01-25T23:58:41Z") - duration({{hours: 24}})
+    RETURN a.id AS alertId, a.rule_level AS severity, a.timestamp AS timestamp
+    ORDER BY a.timestamp
 
 
 The question is:
@@ -174,28 +190,294 @@ def _get_cypher_qa_chain() -> GraphCypherQAChain:
             return_intermediate_steps=True,
             cypher_prompt=cyper_generation_prompt,
             qa_prompt=qa_generation_prompt,
-            qa_llm=ChatOpenAI(model="gpt-3.5-turbo", temperature=0),
-            cypher_llm=ChatOpenAI(model="gpt-4o", temperature=0),
+            qa_llm=fast_llm,
+            cypher_llm=llm,
             allow_dangerous_requests=True,
             use_function_response=True
         )
     return _cypher_qa_chain
 
 
-def query_cypher(question: str, query_timestamp: Optional[str] = None) -> dict:
+# Appended to the question in case-scoped mode. The scope itself is NOT
+# left to the LLM -- src/retrieval/case_scope.py rewrites every Alert node
+# pattern deterministically -- this only asks for the two columns that make
+# each returned row attributable to an alert, and for no LIMIT of its own.
+_SCOPE_NOTE = (
+    "(Scope: this query is executed twice automatically -- once restricted to the member alerts of "
+    "the case under investigation, once over all other alerts. Do NOT filter by a list of alert IDs "
+    "yourself and do NOT add a LIMIT. Whenever a row describes an individual alert, return "
+    "`a.id AS alertId` and `a.timestamp AS timestamp` among its columns.)"
+)
+# Identifiers that exist only in this module's prompt examples or are
+# obvious stand-ins. In the first live v3 run two of five generated queries
+# anchored on `{id: "alert-123"}` and `{id: "host-id"}` -- the question
+# said "this alert"/"this host" and the generator, which never sees the
+# case, filled the gap from the examples. Such a query returns nothing by
+# construction, and "nothing" was then read as evidence. It is now a
+# generation failure, recorded like any other failed retrieval.
+_PLACEHOLDER_VALUE = (
+    r"(alert-123|webserver01|203\.0\.113\.7|"
+    r"(?:host|alert|user|ip)[-_ ]?(?:id|name|address)|<[^\"'>]*>|your[-_ ][^\"']*|example[^\"']*|REPLACE[^\"']*)")
+# Matches the placeholder wherever an id is compared: `{id: "x"}`,
+# `a.id = "x"`, `toLower(h.id) CONTAINS 'x'`, `a.id IN ["x"]`. The v3 run
+# only needed the map form; the generator is free to write any of them.
+_PLACEHOLDER_ID_RE = re.compile(
+    r"\bid\)?\s*(?::|=|CONTAINS|STARTS\s+WITH|IN\s*\[)\s*[\"']" + _PLACEHOLDER_VALUE + r"[\"']",
+    re.IGNORECASE)
+
+# One regeneration, with the failure shown to the generator. The dispatcher's
+# own retry repeats the same prompt, so a deterministic generation fault
+# (placeholder anchor, rejected syntax) failed identically twice.
+_GENERATION_ATTEMPTS = 2
+
+# Filters on free text the generator cannot know: a tag that most alerts
+# lack, or a literal it guessed. Only consulted when a query returns nothing.
+_GUESSED_FILTER_RE = re.compile(
+    r"\b\w+\.tactic\b|\b\w+\.(?:title|full_log)\)?\s*(?:CONTAINS|STARTS\s+WITH|=~?)\s*[\"']",
+    re.IGNORECASE)
+
+
+def _find_placeholder(query: str):
+    match = _PLACEHOLDER_ID_RE.search(query or "")
+    return match.group(1) if match else None
+
+
+def _guessed_filters(query: str) -> list:
+    return sorted({m.group(0).strip() for m in _GUESSED_FILTER_RE.finditer(query or "")})
+
+
+def _repairable(exc: BaseException) -> bool:
+    """A faulty query (placeholder, rejected schema, Neo4j statement error)
+    can be rewritten; a timeout or lost connection cannot."""
+    from src.retrieval import scoped_fetch
+    return isinstance(exc, ValueError) or scoped_fetch.is_cypher_syntax_error(exc)
+
+
+def _repair_feedback(previous: str, reason: str) -> str:
+    return ("(Your previous query was rejected -- do not repeat it.\n"
+            f"Previous query:\n{(previous or '').strip()[:1500]}\n"
+            f"Problem: {reason[:600]}\n"
+            "Write a corrected query. Quote string literals with double quotes and write no backticks inside them; "
+            "anchor on the case's real host ID(s) or on no id at all; never use an identifier from the examples.)")
+
+
+def _empty_feedback(previous: str, filters: list) -> str:
+    return ("(Your previous query returned NO rows, and it filtered on text you could not have known "
+            f"({'; '.join(filters)[:300]}). Previous query:\n{(previous or '').strip()[:1500]}\n"
+            "Write a broader query: drop the guessed filter, keep the anchor entity, and return the alert's "
+            "own `title`, `rule_level`, `full_log`, `timestamp` so its content can be read.)")
+
+
+def _is_empty(context: dict) -> bool:
+    try:
+        return (context["case_evidence"]["total_rows"] == 0
+                and context["historical_evidence"]["total_rows"] == 0)
+    except (KeyError, TypeError):
+        return False
+
+
+def _entity_hint(case_scope: dict) -> str:
+    """What the generator needs in order not to invent an anchor."""
+    hosts = list(case_scope.get("hosts") or [])[:20]
+    return (
+        "(Entities: if the question says 'this alert', 'this case' or 'these alerts' without naming an "
+        "alert ID, do not filter Alert nodes by id at all -- the scope restriction already selects the "
+        "case's alerts. Never invent an identifier or reuse one from the examples."
+        + (f" The case's host ID(s): {', '.join(hosts)}." if hosts else "") + ")")
+
+
+# Rows pulled for the post-filter fallback (no DB-side scope available).
+_POST_FILTER_FETCH_CAP = cs.CASE_FETCH_CAP + cs.HISTORICAL_FETCH_CAP
+
+
+def _generate_cypher(question: str) -> str:
+    """Same prompt, model, extraction and schema-based correction as
+    GraphCypherQAChain._call, without its execute-then-slice step."""
+    from langchain_neo4j.chains.graph_qa.cypher import extract_cypher
+    from langchain_neo4j.chains.graph_qa.cypher_utils import CypherQueryCorrector, Schema
+    from src.ingestion.graph_schema import SCHEMA_TEXT, RELATIONSHIPS
+    chain = _get_cypher_qa_chain()
+    generated = chain.cypher_generation_chain.invoke({"question": question, "schema": SCHEMA_TEXT})
+    generated = extract_cypher(generated)
+    # A ```cypher fence leaves its language tag as the first line. Neo4j
+    # happens to accept a bare leading CYPHER keyword, but it is not part
+    # of the query.
+    generated = re.sub(r"^\s*cypher\s*\n", "", generated, flags=re.IGNORECASE)
+    if not (generated or '').strip():
+        raise ValueError('Cypher model returned an empty query before schema validation')
+    # The observed schema can be sparse at startup and is cached by the chain.
+    # A missing edge in that snapshot does not make its declared type invalid.
+    corrected = CypherQueryCorrector([Schema(*r) for r in RELATIONSHIPS])(generated)
+    if not corrected:
+        raise ValueError('Cypher rejected by declared ingestion schema; generated query: ' + generated[:3000])
+    return corrected.strip()
+
+
+def run_scoped_cypher(generated: str, case_scope: dict, *, fetch=None, resolve=None,
+                      is_syntax_error=None) -> dict:
+    """Executes one generated query as two scoped queries and assembles
+    the result (see src/retrieval/case_scope.py). `fetch`/`resolve` are
+    injectable so this is testable without Neo4j.
+
+    Enforcement tiers, recorded in the result's `scope_enforcement`:
+      db_predicate  the case filter is part of the query Neo4j runs, so it
+                    applies before ORDER BY/LIMIT/aggregation (normal path);
+      post_filter   the query could not be rewritten (or this server
+                    rejected the rewritten syntax): it is run once without
+                    its trailing LIMIT and rows are partitioned client-side
+                    by resolving the alert IDs they contain. Still never
+                    mixes channels, but is only complete up to the fetch
+                    cap -- reported in `notes`, never silent."""
+    from src.retrieval import scoped_fetch
+    fetch = fetch or scoped_fetch.fetch_capped
+    resolve = resolve or scoped_fetch.resolve_alerts
+    is_syntax_error = is_syntax_error or scoped_fetch.is_cypher_syntax_error
+    reference_time = case_scope.get("reference_time")
+    params = {cs.CASE_PARAM: list(case_scope["alert_ids"])}
+    if reference_time:
+        params[cs.CUTOFF_PARAM] = reference_time
+    case_ids = set(case_scope["alert_ids"])
+    notes, queries = [], {"generated": generated}
+
+    enforcement = "db_predicate"
+    try:
+        scoped = cs.scope_cypher(generated, has_cutoff=bool(reference_time))
+        case_rows, case_truncated = fetch(scoped["case"], params, cs.CASE_FETCH_CAP)
+        hist_rows, hist_truncated = fetch(scoped["historical"], params, cs.HISTORICAL_FETCH_CAP)
+        queries.update(case=scoped["case"], historical=scoped["historical"])
+    except Exception as exc:
+        if not (isinstance(exc, cs.ScopeRewriteError) or is_syntax_error(exc)):
+            raise
+        enforcement = "post_filter"
+        notes.append(f"Case scope could not be enforced inside the database ({type(exc).__name__}: {exc}); "
+                     f"rows were partitioned after retrieval instead.")
+        unlimited = cs.strip_trailing_limit(generated)
+        queries["post_filter"] = unlimited
+        rows, truncated = fetch(unlimited, {}, _POST_FILTER_FETCH_CAP)
+        meta = resolve(cs.candidate_id_strings(rows))
+        parts = cs.partition_rows(rows, case_ids, set(meta) | case_ids)
+        case_rows, hist_rows = parts["case"], parts["historical"] + parts["mixed"] + parts["unattributed"]
+        case_truncated = hist_truncated = truncated
+        if truncated:
+            notes.append(f"The unscoped query returned more than {_POST_FILTER_FETCH_CAP} rows; case-local "
+                         f"rows beyond that point were not seen. Treat this answer as INCOMPLETE.")
+        if parts["mixed"] or parts["unattributed"]:
+            notes.append(f"{len(parts['mixed'])} row(s) mix member and non-member alerts and "
+                         f"{len(parts['unattributed'])} row(s) name no alert; both are shown under historical "
+                         f"evidence because they are not restricted to this case.")
+
+    case_total, hist_total = len(case_rows), len(hist_rows)
+    if enforcement == "db_predicate" and case_truncated:
+        notes.append(f"More than {cs.CASE_FETCH_CAP} case-local rows matched; only the first {cs.CASE_FETCH_CAP} were read.")
+    if enforcement == "db_predicate" and hist_truncated:
+        notes.append(f"More than {cs.HISTORICAL_FETCH_CAP} historical rows matched; only the first "
+                     f"{cs.HISTORICAL_FETCH_CAP} (in the query's own order) were read, so the historical rows "
+                     f"shown may not be the most recent ones.")
+
+    # Limit AFTER scoping. Case rows diversify the bounded fetched pool,
+    # then get the same recency re-rank as before;
+    # historical rows are ranked by recency first so the background shown
+    # is the most recent activity before the reference time.
+    from src.retrieval.representative import representative_rows
+    case_shown = representative_rows(case_rows, cs.CASE_TOP_K)
+    if len(case_rows) > cs.CASE_TOP_K:
+        notes.append('Case excerpts are diversity-selected from fetched rows; this is not an exhaustive timeline. '
+                     'Selection covers activity, host, source and time where those fields were returned.')
+    if reference_time:
+        case_shown = weight_and_sort_records(case_shown, reference_time)
+        hist_rows = weight_and_sort_records(hist_rows, reference_time)
+    hist_shown = hist_rows[:cs.HISTORICAL_TOP_K]
+
+    meta = resolve(cs.candidate_id_strings(case_shown + hist_shown))
+    known = set(meta) | case_ids
+    # Defence in depth: a row in the case channel that names a non-member
+    # alert means the rewrite missed a pattern. Move it, and say so.
+    leaked = [r for r in case_shown if any(a not in case_ids for a in cs.row_alert_ids(r, known))]
+    if leaked:
+        case_shown = [r for r in case_shown if r not in leaked]
+        hist_shown = leaked + hist_shown
+        notes.append(f"Post-check moved {len(leaked)} row(s) naming non-member alerts out of the case channel.")
+    return cs.build_scoped_result(
+        source="cypher", scope=case_scope, case_rows=case_shown, case_total=case_total,
+        case_truncated=case_truncated, historical_rows=hist_shown, historical_total=hist_total,
+        historical_truncated=hist_truncated, alert_meta=meta, enforcement=enforcement,
+        queries=queries, notes=notes)
+
+
+def query_cypher(question: str, query_timestamp: Optional[str] = None, case_scope: Optional[dict] = None) -> dict:
     """
     Generate and run a Cypher query against the graph database.
     Use this for complex questions requiring structured data, aggregations, or specific graph traversals
     Returns the query and the result context.
 
-    `query_timestamp`, when given, re-ranks the result rows by recency
+    `query_timestamp`, when given, is also appended to `question` as a
+    "Reference time" note (rule 13 in cypher_generation_template above) so
+    the LLM anchors relative-time phrases like "the last 24 hours" to the
+    investigation's own reference point instead of real wall-clock
+    `datetime()` -- this data is historical, so wall-clock "now" would never
+    match it. Separately, it re-ranks the result rows by recency
     (src/retrieval/temporal.py) before they're returned -- the generated
     Cypher's RETURN clause is LLM-controlled and not fixed-schema, so rows
     are heuristically scanned for an ISO-8601 timestamp value rather than
     assuming a specific column.
+
+    `case_scope` (state['case_scope'], set for case investigations) switches
+    to case-scoped retrieval: the case filter is applied inside Neo4j
+    BEFORE any limit, and non-member alerts come back in a separate,
+    labelled historical channel. Without it (src/run.py, per-alert eval)
+    behaviour is unchanged.
     """
     print(f"--- Executing Cypher Search for: {question} ---")
-    response = _get_cypher_qa_chain().invoke({"query": question})
+    enriched_question = question
+    if query_timestamp:
+        enriched_question = f'{question}\n\n(Reference time for relative time phrases: "{query_timestamp}")'
+    if case_scope:
+        # Case investigation: scope first, limit second, two labelled
+        # channels. `context` is a structured dict here (see
+        # run_scoped_cypher); dispatch_retrieval_node renders it.
+        base = f"{enriched_question}\n\n{_SCOPE_NOTE}\n{_entity_hint(case_scope)}"
+
+        last = {"query": ""}   # the query an exception belongs to, for the repair prompt
+
+        def attempt(prompt: str):
+            generated = last["query"] = _generate_cypher(prompt)
+            print(f"Generated Cypher (before case scoping):\n{generated}")
+            if not generated:
+                raise ValueError("Cypher generation produced no valid query for this question")
+            placeholder = _find_placeholder(generated)
+            if placeholder:
+                raise ValueError(f"The generated query anchors on a placeholder identifier ({placeholder!r}), "
+                                 f"not on a real entity; its result would be empty by construction")
+            return generated, run_scoped_cypher(generated, case_scope)
+
+        try:
+            generated, context = attempt(base)
+        except Exception as exc:
+            if not _repairable(exc):
+                raise
+            first_error = f"{type(exc).__name__}: {exc}"
+            failed_query = last["query"]
+            generated, context = attempt(f"{base}\n\n{_repair_feedback(failed_query, first_error)}")
+            context.setdefault("notes", []).append(
+                f"The first generated query was rejected ({first_error[:200]}); this is the regenerated one.")
+        else:
+            filters = _guessed_filters(generated) if _is_empty(context) else []
+            if filters:
+                try:
+                    retry_query, retry_context = attempt(f"{base}\n\n{_empty_feedback(generated, filters)}")
+                except Exception:
+                    retry_query = retry_context = None
+                if retry_context is not None and not _is_empty(retry_context):
+                    retry_context.setdefault("notes", []).append(
+                        f"The first query returned nothing after filtering on {'; '.join(filters)[:200]}; "
+                        f"it was regenerated without the guessed filter.")
+                    generated, context = retry_query, retry_context
+                elif isinstance(context.get("notes"), list):
+                    context["notes"].append(
+                        f"This empty result came from a query that filtered on {'; '.join(filters)[:200]}; "
+                        f"a broader retry also found nothing or failed.")
+        return {"query": generated, "context": context}
+    response = _get_cypher_qa_chain().invoke({"query": enriched_question})
     context = response["intermediate_steps"][1]["context"]
     if query_timestamp and isinstance(context, list):
         context = weight_and_sort_records(context, query_timestamp)

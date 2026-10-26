@@ -12,3 +12,10 @@ venv
 .env
 *.env
 *.json
+
+#alert data
+ait_ldsv2
+
+# investigation runtime state (saved conversations)
+data/checkpoints/
+data/investigations.jsonl

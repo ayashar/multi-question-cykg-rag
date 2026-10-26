@@ -3,7 +3,7 @@ import { type Case, type InvestigatedCaseRecord, type LookbackPreset, LOOKBACK_H
 import { MOCK_CASES } from "../data/cases-fixture";
 import { getCases as fetchCases, getIngestionStatus, registerCasesLookback, getCaseLookback } from "@/api";
 
-export const INVESTIGATED_CASES_STORAGE_KEY = "kgcs_investigated_cases_v2";
+export const INVESTIGATED_CASES_STORAGE_KEY = "cskg_investigated_cases_v2";
 
 /**
  * Stores the lookback_hours used when each case_id first surfaced.
@@ -70,7 +70,7 @@ export function recordInvestigatedCase(
       ...current,
     ];
     localStorage.setItem(INVESTIGATED_CASES_STORAGE_KEY, JSON.stringify(updated.slice(0, 20)));
-    window.dispatchEvent(new Event("kgcs-investigation-history-change"));
+    window.dispatchEvent(new Event("cskg-investigation-history-change"));
   } catch (err) {
     console.warn("Failed to record investigated case:", err);
   }

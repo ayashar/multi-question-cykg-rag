@@ -44,14 +44,16 @@ export interface InvestigationLogProps extends React.HTMLAttributes<HTMLElement>
 
 export function InvestigationLog({ events, className, ...props }: InvestigationLogProps) {
   const activityEvents = events.filter((event) => event.type === "agent" && event.status === "complete" && event.messages?.length);
+  const backendLogEvents = events.filter((event) => event.type === "log" && event.message);
+  const completedAgents = new Set(activityEvents.map((event) => event.agent).filter(Boolean));
 
   return (
     <section className={cn("p-5 text-primary-1000 bg-primary-100 rounded-[10px]", className)} aria-labelledby="investigation-log-title" {...props}>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <h2 id="investigation-log-title" className="font-h6">Investigation log</h2>
-        <span className="ml-auto font-b3 text-primary-700">{activityEvents.length} agents completed</span>
+        <span className="ml-auto font-b3 text-primary-700">{completedAgents.size} agents completed</span>
       </div>
-      {activityEvents.length ? (
+      {activityEvents.length || backendLogEvents.length ? (
         <ol className="space-y-4" aria-label="Completed investigation agent log">
           {activityEvents.map((event, eventIndex) => (
             <li key={`${event.agent}-${eventIndex}`} className="grid gap-2 border-t border-primary-300 pt-4 first:border-t-0 first:pt-0 sm:grid-cols-[180px_minmax(0,1fr)]">
@@ -67,6 +69,18 @@ export function InvestigationLog({ events, className, ...props }: InvestigationL
               </div>
             </li>
           ))}
+          {backendLogEvents.length > 0 && (
+            <li className="border-t border-primary-300 pt-4">
+              <p className="mb-2 font-b3 font-semibold">Backend agent output</p>
+              <div className="space-y-1.5 border-l-2 border-primary-300 pl-3">
+                {backendLogEvents.map((event, eventIndex) => (
+                  <p key={`${event.agent}-${event.timestamp}-${eventIndex}`} className="font-mono text-xs leading-relaxed wrap-anywhere">
+                    {event.agent ? `[${event.agent}] ` : ""}{event.message}
+                  </p>
+                ))}
+              </div>
+            </li>
+          )}
         </ol>
       ) : (
         <p className="font-b2 text-primary-800">No agent activity was recorded for this investigation.</p>
@@ -90,6 +104,7 @@ export function InvestigationLoader({ startTime, caseId, events = [], className,
   const runningEvent = [...agentEvents].reverse().find((event) => event.status === "running" && getInvestigationAgentState(event.agent ?? "", events) !== "complete");
   const latestEvent = runningEvent ?? agentEvents.at(-1);
   const activityEvents = agentEvents.filter((event) => event.status === "complete" && event.messages?.length);
+  const backendLogEvents = events.filter((event) => event.type === "log" && event.message);
   const isDemo = process.env.NEXT_PUBLIC_USE_MOCK === "true";
 
   return (
@@ -156,23 +171,38 @@ export function InvestigationLoader({ startTime, caseId, events = [], className,
               <h3 className="font-b1 font-semibold">Agent activity log</h3>
               <span className="ml-auto flex items-center gap-1.5 font-b3 text-green-500"><span className="size-2 rounded-full bg-green-500 motion-safe:animate-pulse" />Live</span>
             </div>
-            {activityEvents.length ? (
-              <ol className="max-h-[350px] space-y-4 overflow-y-auto pr-2" aria-label="Live agent activity log">
-                {activityEvents.map((event, eventIndex) => (
-                  <li key={`${event.agent}-${eventIndex}`} className="space-y-2">
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <span className="font-mono text-[11px] text-primary-700">{formatElapsed(event.elapsed_seconds)}</span>
-                      <span className="font-b3 font-semibold">{event.label}</span>
-                      <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-green-500">Complete</span>
-                    </div>
-                    <div className="space-y-1.5 border-l-2 border-primary-300 pl-3">
-                      {event.messages?.map((message) => (
-                        <p key={message} className="font-mono text-xs leading-relaxed text-primary-1000 wrap-anywhere">{message}</p>
-                      ))}
-                    </div>
-                  </li>
-                ))}
-              </ol>
+            {activityEvents.length || backendLogEvents.length ? (
+              <div className="space-y-4">
+                {activityEvents.length > 0 && (
+                  <ol className="max-h-[350px] space-y-4 overflow-y-auto pr-2" aria-label="Live agent activity log">
+                    {activityEvents.map((event, eventIndex) => (
+                      <li key={`${event.agent}-${eventIndex}`} className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="font-mono text-[11px] text-primary-700">{formatElapsed(event.elapsed_seconds)}</span>
+                          <span className="font-b3 font-semibold">{event.label}</span>
+                          <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-green-500">Complete</span>
+                        </div>
+                        <div className="space-y-1.5 border-l-2 border-primary-300 pl-3">
+                          {event.messages?.map((message) => (
+                            <p key={message} className="font-mono text-xs leading-relaxed text-primary-1000 wrap-anywhere">{message}</p>
+                          ))}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+                {backendLogEvents.length > 0 && (
+                  <ol className="max-h-[350px] space-y-2 overflow-y-auto border-t border-primary-300 pt-3 pr-2" aria-label="Live backend agent log">
+                    {backendLogEvents.map((event, eventIndex) => (
+                      <li key={`${event.agent}-${event.timestamp}-${eventIndex}`} className="border-l-2 border-primary-300 pl-3">
+                        <p className="font-mono text-xs leading-relaxed text-primary-1000 wrap-anywhere">
+                          {event.agent ? `[${event.agent}] ` : ""}{event.message}
+                        </p>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
             ) : (
               <div className="flex min-h-28 items-center justify-center border border-dashed border-primary-300 bg-background/35 px-4 text-center font-b2 text-primary-800">
                 Agent output will appear here as each pipeline node completes.
@@ -184,7 +214,9 @@ export function InvestigationLoader({ startTime, caseId, events = [], className,
       <p className="font-b3 text-neutral-800">
         {isDemo
           ? "Demo mode replays sample agent events. The same pipeline timeline accompanies the existing API request when demo mode is off."
-          : "The frontend reconstructs this pipeline timeline while the existing investigation request runs. Case details and the report appear only after the final API result arrives."}
+          : events.some((event) => event.source === "backend")
+            ? "Live progress and agent logs are coming from the investigation backend. Case details and the report appear after the final API result arrives."
+            : "The backend does not expose live progress yet, so the frontend uses a compatibility pipeline timeline while the investigation request runs."}
       </p>
     </div>
   );

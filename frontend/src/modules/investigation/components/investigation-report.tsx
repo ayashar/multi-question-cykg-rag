@@ -4,9 +4,11 @@ import { Download } from "lucide-react";
 import type { Case, TurnRecord } from "@/api";
 import { Button } from "@/components/ui/button";
 import { TurnResult } from "@/components/ui/error-states";
+import MarkdownContent from "@/components/ui/markdown-content";
 import MitreBadges from "@/modules/cases/components/mitre-badges";
 import { buildInvestigationReport } from "../services/investigation-service";
 import { formatInvestigationTime } from "./case-details";
+import ConfidenceBadge from "./confidence-badge";
 
 export function DownloadReportButton({ value, turn }: { value: Case; turn: TurnRecord }) {
   const download = () => {
@@ -44,10 +46,10 @@ export default function InvestigationReport({
         </div>
         <dl className="grid gap-4 sm:grid-cols-2">
           <div className="rounded-[3px] bg-primary-100/50 p-4"><dt className="font-b2">Recommended priority</dt><dd className="mt-1 font-h7 font-semibold capitalize">{turn.recommended_priority ?? "Not provided"}</dd></div>
-          <div className="rounded-[3px] bg-primary-100/50 p-4"><dt className="font-b2">Confidence</dt><dd className="mt-1 font-h7 font-semibold capitalize">{turn.confidence ?? "Not provided"}</dd></div>
+          <div className="rounded-[3px] bg-primary-100/50 p-4"><dt className="font-b2">Confidence</dt><dd className="mt-1"><ConfidenceBadge confidence={turn.confidence} /></dd></div>
         </dl>
-        <section className="space-y-2"><h3 className="font-h7 font-semibold">Investigation findings</h3><p className="whitespace-pre-wrap font-b1 wrap-anywhere">{turn.answer || "The investigation returned no narrative."}</p></section>
-        <section className="space-y-2"><h3 className="font-h7 font-semibold">Critical analysis</h3><p className="whitespace-pre-wrap font-b1 wrap-anywhere">{turn.critical_analysis || "No critical analysis was provided."}</p></section>
+        <section className="space-y-2"><h3 className="font-h7 font-semibold">Investigation findings</h3><MarkdownContent value={turn.answer || "The investigation returned no narrative."} className="font-b1" /></section>
+        <section className="space-y-2"><h3 className="font-h7 font-semibold">Critical analysis</h3><MarkdownContent value={turn.critical_analysis || "No critical analysis was provided."} className="font-b1" /></section>
         <section className="space-y-2"><h3 className="font-h7 font-semibold">Mitigation suggestions</h3>
           {turn.mitigation_suggestions.length ? <ul className="list-disc space-y-2 pl-5 font-b1 wrap-anywhere">{turn.mitigation_suggestions.map((suggestion, i) => <li key={i}>{suggestion}</li>)}</ul>
             : <p className="font-b2 text-neutral-800">No mitigation suggestions were provided.</p>}

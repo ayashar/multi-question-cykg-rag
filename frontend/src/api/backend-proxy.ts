@@ -1,8 +1,39 @@
 const DEFAULT_BACKEND_URL = "http://127.0.0.1:8000";
-const REQUEST_TIMEOUT_MS = 120_000;
+// A live investigation is synchronous on the backend while its agents run.
+// With the free OpenRouter route plus Neo4j retrieval, a cold run can take
+// several minutes; 120s caused the Next proxy to return 504 while the
+// backend was still making progress (the SSE stream remained alive).
+const REQUEST_TIMEOUT_MS = 600_000;
+const EVENT_STREAM_TIMEOUT_MS = 660_000;
 
 const requestHeadersToForward = ["accept", "content-type"] as const;
 const responseHeadersToForward = ["cache-control", "content-disposition", "content-type"] as const;
+
+function streamSseWithPreamble(body: ReadableStream<Uint8Array> | null): ReadableStream<Uint8Array> | null {
+  if (!body) return null;
+  const reader = body.getReader();
+  const encoder = new TextEncoder();
+
+  // Keep EventSource connected while the backend waits for the next turn.
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      controller.enqueue(encoder.encode(": proxy-connected\n\n"));
+      try {
+        while (true) {
+          const next = await reader.read();
+          if (next.done) break;
+          controller.enqueue(next.value);
+        }
+        controller.close();
+      } catch (reason) {
+        controller.error(reason);
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
+}
 
 function getBackendUrl(): URL {
   const backend = new URL(process.env.INVESTIGATION_API_URL || DEFAULT_BACKEND_URL);
@@ -60,10 +91,11 @@ export async function proxyBackendRequest(request: Request, path: string[]): Pro
       body: body?.byteLength ? body : undefined,
       cache: "no-store",
       redirect: "manual",
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(path.at(-1) === "events" ? EVENT_STREAM_TIMEOUT_MS : REQUEST_TIMEOUT_MS),
     });
 
-    return new Response(upstream.body, {
+    const responseBody = path.at(-1) === "events" ? streamSseWithPreamble(upstream.body) : upstream.body;
+    return new Response(responseBody, {
       status: upstream.status,
       statusText: upstream.statusText,
       headers: buildResponseHeaders(upstream),

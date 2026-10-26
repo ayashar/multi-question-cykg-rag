@@ -40,21 +40,45 @@ graph's edges -- both are node-internal short-circuits, not new routing:
   directive over a case a human already selected, not a question needing
   triage.
 - `state['investigation_mode']` (guardrails_agent.py's per-turn routing
-  decision, meaningful on follow-up turns): 'full_hypothesis' behaves
-  exactly as described above; 'direct_question' asks
-  question_generation_node for exactly one targeted question instead of
-  3-5; 'answer_from_context' skips question_generation/dispatch_retrieval/
-  review_evidence entirely and lets synthesizer answer straight from
-  whatever question_results/log_cypher_context/log_vector_context/
-  mcp_rdf_context the last turn that actually retrieved something left
-  behind -- these are plain (non-reducer) state fields, so the checkpointer
-  carries them forward unchanged across a turn that does no new retrieval,
-  which is what makes this "cache" possible with no extra state or
-  storage.
+  decision): the initial case turn uses 'full_hypothesis'; follow-up turns
+  use 'direct_question' for one targeted question or
+  'answer_from_context' when existing evidence is enough. Follow-up
+  'full_hypothesis' output is normalized to 'direct_question' at the graph
+  boundary. 'answer_from_context' skips
+  question_generation/dispatch_retrieval/review_evidence entirely and lets
+  synthesizer answer straight from whatever
+  question_results/log_cypher_context/log_vector_context/mcp_rdf_context the
+  last turn that actually retrieved something left behind -- these are plain
+  (non-reducer) state fields, so the checkpointer carries them forward
+  unchanged across a turn that does no new retrieval, which is what makes
+  this "cache" possible with no extra state or storage.
+
+Config v3 (after the russellmitchell-cases-fused pilot; see
+eval/output/russellmitchell-cases-fused/baseline_status.json) changes what
+three nodes do, again without changing the graph's edges:
+- dispatch_retrieval: when `state['case_scope']` is set, Cypher and vector
+  retrieval are restricted to the case's member alerts BEFORE any row
+  limit, and everything else comes back as a separate, labelled historical
+  channel (src/retrieval/case_scope.py). A retrieval that fails is recorded
+  as a failure with its error type, stage and timing
+  (`state['dependency_failures']`, `state['source_status']`) instead of
+  becoming an "Error retrieving..." string indistinguishable from evidence.
+- synthesizer: emits structured `claims`; reports unavailable sources as
+  unavailable rather than "Not applicable".
+- grounding_check: validates each claim against the alerts it cites and
+  against case membership (src/agents/grounding_check.py::validate_report),
+  not just that cited entity strings occur somewhere in the context;
+  unsupported conclusions lower confidence and priority deterministically.
+  By default the synthesizer rates each claim itself in the call that writes
+  the report (SELF-VALIDATION in its prompt); EVIDENCE_CLAIM_VERIFIER=llm opts
+  in to a separate model call per claim (src/agents/claim_verifier.py).
+  Neither is human ground truth.
 """
 import asyncio
 import logging
 import os
+import time
+from contextvars import copy_context
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeoutError
 from langchain_core.messages import AIMessage
 from langgraph.graph import StateGraph, END
@@ -63,11 +87,16 @@ from src.graph.state import AgentState
 from src.agents.guardrails_agent import guardrails_chain, _render_alert_context
 from src.agents.question_generation_agent import generate_questions
 from src.agents.review_agent import review_chain
-from src.agents.synthesizer_agent import synthesis_chain, SynthesizedReport
+from src.agents.synthesizer_agent import synthesis_chain, synthesis_chain_fast, SynthesizedReport
 from src.agents.vector_agent import query_vector_search
 from src.agents.cypher_agent import query_cypher
 from src.agents.mcp_rdf_agent import NO_DATA_MARKER as _MCP_NO_DATA_MARKER, run_mcp_agent
-from src.agents.grounding_check import check_grounding
+from src.agents.grounding_check import (
+    apply_claim_verdicts, apply_self_assessment, case_context_alerts, retry_note as _validation_retry_note,
+    summarize_claims, validate_report, validation_adjustments,
+)
+from src.agents import claim_verifier
+from src.retrieval import case_scope as cs
 
 logger = logging.getLogger(__name__)  # graph assembly / module-level only
 
@@ -92,6 +121,9 @@ grounding_check_logger = logging.getLogger("agent.grounding_check")
 # 37/11-minute MCP SPARQL hangs (socket.setdefaulttimeout in
 # mcp-cskg-rdf/server.py).
 NODE_CALL_TIMEOUT_SECONDS = int(os.environ.get("NODE_CALL_TIMEOUT_SECONDS", "60"))
+CSKG_NODE_CALL_TIMEOUT_SECONDS = int(os.environ.get("CSKG_NODE_CALL_TIMEOUT_SECONDS", "120"))
+CYPHER_NODE_CALL_TIMEOUT_SECONDS = int(os.environ.get("CYPHER_NODE_CALL_TIMEOUT_SECONDS", "180"))
+CYPHER_MAX_CONCURRENCY = max(1, int(os.environ.get("CYPHER_MAX_CONCURRENCY", "2")))
 _retrieval_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="retrieval-timeout")
 
 # How many past turns' retrieved evidence dispatch_retrieval_node keeps
@@ -123,7 +155,7 @@ def _window_question_results(results: list, current_turn: int) -> list:
 
 
 def _call_with_timeout(fn, *args, timeout: int = NODE_CALL_TIMEOUT_SECONDS, **kwargs):
-    future = _retrieval_executor.submit(fn, *args, **kwargs)
+    future = _retrieval_executor.submit(copy_context().run, fn, *args, **kwargs)
     try:
         return future.result(timeout=timeout)
     except _FutureTimeoutError:
@@ -171,6 +203,86 @@ def _current_turn_number(messages: list) -> int:
     return sum(1 for m in (messages or []) if getattr(m, "type", None) == "human") or 1
 
 
+# --- Retrieval outcome bookkeeping ---
+_SOURCES = ("cypher", "vector", "cskg")
+
+
+def _describe_failure(source: str, exc: BaseException, attempts: int, seconds: float) -> dict:
+    """A retrieval failure as data. `str(asyncio.TimeoutError())` is the
+    empty string, which is how the pilot's CSKG outage ended up logged as
+    "failed after 2 attempt(s): " with nothing after the colon."""
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)) and not str(exc):
+        limit = {'cskg': CSKG_NODE_CALL_TIMEOUT_SECONDS,
+                 'cypher': CYPHER_NODE_CALL_TIMEOUT_SECONDS}.get(source, NODE_CALL_TIMEOUT_SECONDS)
+        message = f"no response within {limit}s"
+    else:
+        message = str(exc) or "no message"
+    return {"source": source, "error_type": type(exc).__name__, "message": message,
+            "stage": getattr(exc, "stage", None), "attempts": attempts, "seconds": round(seconds, 1)}
+
+
+def _retrieval_failed(result: dict) -> bool:
+    return (result.get("retrieval") or {}).get("status") == "failed"
+
+
+def _has_case_evidence(result: dict) -> bool:
+    return bool((result.get("evidence") or {}).get("case_alert_ids") or (result.get("evidence") or {}).get("case_rows"))
+
+
+def _source_status(results: list) -> dict:
+    """Per source: not_queried | ok | partial_failure | failed, with the
+    failure messages. Computed from the same windowed list everything
+    else is derived from, so a later answer_from_context turn still knows
+    a source was down when its evidence was gathered."""
+    status = {}
+    for source in _SOURCES:
+        mine = [r for r in results if r.get("source") == source]
+        failed = [r for r in mine if _retrieval_failed(r)]
+        if not mine:
+            state = "not_queried"
+        elif not failed:
+            state = "ok"
+        else:
+            state = "failed" if len(failed) == len(mine) else "partial_failure"
+        status[source] = {"status": state, "questions": len(mine), "failed": len(failed),
+                          "errors": sorted({f"{r['retrieval']['error_type']}: {r['retrieval']['message']}" for r in failed})}
+    return status
+
+
+def _build_evidence_index(results: list, case_scope: dict | None, case_context: str | None) -> dict:
+    """{alert_id: {scope, text, timestamp, host, time_relation, sources}}
+    for every alert whose content the model was shown: scoped retrieval
+    rows plus the member alerts quoted in the case fact sheet. This is
+    what citations are validated against."""
+    if not case_scope:
+        return {}
+    index: dict = {}
+    for aid, line in case_context_alerts(case_context, case_scope["alert_ids"]).items():
+        index[aid] = {"scope": cs.SCOPE_CASE, "text": line, "timestamp": None, "host": None,
+                      "time_relation": "member", "sources": ["case_context"]}
+    for r in results:
+        evidence = r.get("evidence") or {}
+        for aid, prov in (evidence.get("provenance") or {}).items():
+            entry = index.setdefault(aid, {"scope": prov.get("scope"), "text": "", "timestamp": None, "host": None,
+                                           "time_relation": prov.get("time_relation"), "sources": []})
+            entry["timestamp"] = entry["timestamp"] or prov.get("timestamp")
+            entry["host"] = entry["host"] or prov.get("host")
+            text = (evidence.get("alert_text") or {}).get(aid) or ""
+            if text and text not in entry["text"] and len(entry["text"]) < 2 * cs.EVIDENCE_TEXT_CHARS:
+                entry["text"] = (entry["text"] + "\n" + text).strip()
+            if r.get("source") not in entry["sources"]:
+                entry["sources"].append(r.get("source"))
+    return index
+
+
+def _render_failures(failures: list) -> str:
+    if not failures:
+        return "None."
+    return "\n".join(
+        f"- {f['source']} (turn {f.get('turn', '?')}): {f['error_type']}: {f['message']} "
+        f"[question: {f.get('question', '?')!r}; {f['attempts']} attempt(s), {f['seconds']}s]" for f in failures)
+
+
 # --- Node Definition: Guardrails ---
 def guardrails_node(state: AgentState):
     """Relevance check + investigation-mode routing in one call. Used to
@@ -196,9 +308,10 @@ def guardrails_node(state: AgentState):
 
     question = state['question']
     alert_context = _render_alert_context(state.get('alert'))
-    case_context = state.get('case_context') or "N/A"
+    case_context = (state.get('case_context') or "N/A") + (state.get('related_findings_context') or "")
     conversation_context = _render_conversation_context(messages)
     prior_evidence_summary = _render_prior_evidence(state)
+    is_followup = turn_no > 1
     guardrails_logger.info(f"invoked -- question={question!r}")
     result = guardrails_chain.invoke({
         "question": question,
@@ -207,8 +320,14 @@ def guardrails_node(state: AgentState):
         "conversation_context": conversation_context,
         "prior_evidence_summary": prior_evidence_summary,
     })
+    mode = result.investigation_mode
+    if is_followup and mode == "full_hypothesis":
+        # Keep chat turns focused even if the router model over-classifies a
+        # question with multiple possible explanations.
+        mode = "direct_question"
+        guardrails_logger.info("normalized follow-up mode full_hypothesis -> direct_question")
     guardrails_logger.info(
-        f"output: decision={result.decision} investigation_mode={result.investigation_mode} "
+        f"output: decision={result.decision} investigation_mode={mode} "
         f"reasoning={result.reasoning!r}"
     )
 
@@ -216,12 +335,12 @@ def guardrails_node(state: AgentState):
         answer = "Sorry, I can only answer questions related to log analysis and cybersecurity knowledge topic"
         return {
             "is_relevant": False,
-            "investigation_mode": result.investigation_mode,
+            "investigation_mode": mode,
             "answer": answer,
             "messages": [AIMessage(content=answer, id=f"turn-{turn_no}-answer")],
         }
 
-    return {"is_relevant": True, "investigation_mode": result.investigation_mode}
+    return {"is_relevant": True, "investigation_mode": mode}
 
 
 # --- Node Definition: Question Generation ---
@@ -263,8 +382,9 @@ def _guaranteed_mitigation_question(state: AgentState) -> dict | None:
 
 
 def question_generation_node(state: AgentState):
-    """Generates several hypothesis-tagged investigative questions from the
-    alert/question, each pre-tagged with which retrieval source answers it."""
+    """Generates investigation questions from the alert/question, each
+    pre-tagged with which retrieval source answers it. Initial turns use a
+    hypothesis set; focused follow-ups use one question."""
     mode = state.get('investigation_mode') or "full_hypothesis"
     if mode == "answer_from_context":
         # Guardrails decided the evidence already gathered in a prior turn
@@ -278,9 +398,9 @@ def question_generation_node(state: AgentState):
         return {}
 
     alert_summary = state['original_question']
-    case_context = state.get('case_context') or "N/A"
+    case_context = (state.get('case_context') or "N/A") + (state.get('related_findings_context') or "")
     conversation_context = _render_conversation_context(state.get('messages') or [])
-    question_generation_logger.info(f"invoked (mode={mode})")
+    question_generation_logger.info(f"invoked (mode={mode}, tier={'full' if mode in ('full_hypothesis', 'single_interpretation') else 'fast'})")
     result = generate_questions(alert_summary, case_context=case_context, conversation_context=conversation_context, mode=mode)
     questions = [q.model_dump() for q in result.questions]
     question_generation_logger.info(
@@ -292,7 +412,7 @@ def question_generation_node(state: AgentState):
             f"  - hypothesis={q['hypothesis']!r} question={q['question']!r} source={q['source']}"
         )
 
-    mitigation_q = _guaranteed_mitigation_question(state)
+    mitigation_q = _guaranteed_mitigation_question(state) if mode == "full_hypothesis" else None
     if mitigation_q:
         questions.append(mitigation_q)
         question_generation_logger.info(f"  - GUARANTEED: question={mitigation_q['question']!r} source=cskg")
@@ -323,23 +443,30 @@ async def dispatch_retrieval_node(state: AgentState):
         dispatch_retrieval_logger.info("no questions generated this turn -- nothing to dispatch")
         return {}
     query_timestamp = state.get('query_timestamp')
+    case_scope = state.get('case_scope')
     turn_no = _current_turn_number(state.get('messages') or [])
-    dispatch_retrieval_logger.info(f"invoked -- dispatching {len(questions)} question(s) concurrently")
+    dispatch_retrieval_logger.info(
+        f"invoked -- dispatching {len(questions)} question(s) concurrently "
+        f"({'case-scoped to ' + case_scope['case_id'] if case_scope else 'unscoped'})")
 
     async def _retrieve_once(source: str, q_text: str):
         """One retrieval attempt for a single (source, question) pair.
         Raises on failure -- run_one below decides whether to retry."""
         if source == "vector":
-            return await asyncio.to_thread(_call_with_timeout, query_vector_search, q_text, query_timestamp)
+            return await asyncio.to_thread(_call_with_timeout, query_vector_search, q_text, query_timestamp, case_scope)
         elif source == "cypher":
-            cypher_result = await asyncio.to_thread(_call_with_timeout, query_cypher, q_text, query_timestamp)
+            async with cypher_slots:
+                cypher_result = await asyncio.to_thread(
+                    _call_with_timeout, query_cypher, q_text, query_timestamp, case_scope,
+                    timeout=CYPHER_NODE_CALL_TIMEOUT_SECONDS)
             return cypher_result.get("context", [])
         elif source == "cskg":
-            return await asyncio.wait_for(run_mcp_agent(q_text), timeout=NODE_CALL_TIMEOUT_SECONDS)
+            return await asyncio.wait_for(run_mcp_agent(q_text), timeout=CSKG_NODE_CALL_TIMEOUT_SECONDS)
         else:
             return f"Unknown source tag '{source}' for this question."
 
     _MAX_RETRIEVAL_ATTEMPTS = 2  # 1 bounded retry, same bound as grounding_check's synthesis retry elsewhere in this graph
+    cypher_slots = asyncio.Semaphore(CYPHER_MAX_CONCURRENCY)
 
     async def run_one(gq: dict) -> dict:
         """Retries only an actual retrieval *failure* (an exception --
@@ -357,21 +484,61 @@ async def dispatch_retrieval_node(state: AgentState):
         the same way again."""
         q_text = gq["question"]
         source = gq["source"]
-        context = None
-        for attempt in range(1, _MAX_RETRIEVAL_ATTEMPTS + 1):
+        context, failure, started = None, None, time.monotonic()
+        max_attempts = 1 if source == "cskg" else _MAX_RETRIEVAL_ATTEMPTS
+        for attempt in range(1, max_attempts + 1):
             try:
                 context = await _retrieve_once(source, q_text)
+                failure = None
                 break
             except Exception as e:
-                if attempt < _MAX_RETRIEVAL_ATTEMPTS:
+                failure = _describe_failure(source, e, attempt, time.monotonic() - started)
+                # A timed-out worker thread may still be running. Retrying it
+                # here can overlap the same expensive request and amplify load.
+                retryable = not isinstance(e, TimeoutError)
+                if source == "cypher":
+                    # A lost routing connection is worth one retry. Do not
+                    # rerun a slow/failed database query and multiply load.
+                    from neo4j.exceptions import ServiceUnavailable
+                    retryable = isinstance(e, ServiceUnavailable)
+                if attempt < max_attempts and retryable:
                     dispatch_retrieval_logger.warning(
-                        f"({source}) {q_text!r} failed on attempt {attempt}, retrying once: {e}"
+                        f"({source}) {q_text!r} failed on attempt {attempt}, retrying once: "
+                        f"{failure['error_type']}: {failure['message']}"
                     )
                     continue
-                dispatch_retrieval_logger.error(f"({source}) {q_text!r} failed after {attempt} attempt(s): {e}")
-                context = f"Error retrieving for this question: {e}"
+                dispatch_retrieval_logger.error(
+                    f"({source}) {q_text!r} DEPENDENCY FAILURE after {attempt} attempt(s) in {failure['seconds']}s: "
+                    f"{failure['error_type']}: {failure['message']}"
+                    + (f" (stage: {failure['stage']})" if failure['stage'] else ""))
+        if failure:
+            # Kept as a context string too (review/synthesis prompts read
+            # it), but the structured `retrieval` record is what marks
+            # this as a failure -- never as an empty or negative result.
+            context = (f"RETRIEVAL FAILED -- the {source} source could not be queried "
+                       f"({failure['error_type']}: {failure['message']}). This is NOT a negative result.")
+            return {**gq, "context": context, "retrieval": {"status": "failed", **failure}, "evidence": None}
+        evidence = None
+        if isinstance(context, dict) and context.get("scoped"):
+            evidence = {
+                "scope_enforcement": context["scope_enforcement"],
+                "case_alert_ids": context["case_evidence"]["alert_ids"],
+                "historical_alert_ids": context["historical_evidence"]["alert_ids"],
+                "case_rows": len(context["case_evidence"]["rows"]),
+                "case_rows_total": context["case_evidence"]["total_rows"],
+                "historical_rows": len(context["historical_evidence"]["rows"]),
+                "historical_rows_total": context["historical_evidence"]["total_rows"],
+                "provenance": context["provenance"], "alert_text": context["alert_text"],
+                "queries": context.get("queries"), "notes": context.get("notes"),
+            }
+            dispatch_retrieval_logger.info(
+                f"scope: ({source}) {q_text!r} -> {evidence['case_rows']}/{evidence['case_rows_total']} case-local, "
+                f"{evidence['historical_rows']}/{evidence['historical_rows_total']} historical row(s) "
+                f"[{evidence['scope_enforcement']}]" + (f" notes={evidence['notes']}" if evidence['notes'] else ""))
+            context = context["rendered"]
         dispatch_retrieval_logger.info(f"output: ({source}) {q_text!r} -> {str(context)[:300]!r}")
-        return {**gq, "context": context}
+        return {**gq, "context": context, "evidence": evidence,
+                "retrieval": {"status": "ok", "attempts": attempt, "seconds": round(time.monotonic() - started, 1)}}
 
     results = list(await asyncio.gather(*(run_one(gq) for gq in questions)))
     for r in results:
@@ -387,10 +554,28 @@ async def dispatch_retrieval_node(state: AgentState):
     accumulated = (state.get('question_results') or []) + results
     windowed = _window_question_results(accumulated, turn_no)
 
-    cypher_ctx = [r["context"] for r in windowed if r["source"] == "cypher" and r["context"]]
-    vector_ctx = "\n".join(str(r["context"]) for r in windowed if r["source"] == "vector" and r["context"])
-    cskg_ctx = "\n".join(str(r["context"]) for r in windowed if r["source"] == "cskg" and r["context"])
+    # Failed retrievals are excluded from the evidence contexts below --
+    # they are reported through dependency_failures/source_status instead,
+    # so an outage can neither count as a source "with data" nor be read
+    # as "nothing found".
+    usable = [r for r in windowed if not _retrieval_failed(r)]
+
+    def _has_rows(r):  # scoped results with no rows in either channel add nothing to the context
+        e = r.get("evidence")
+        return bool(r["context"]) and (e is None or e["case_rows"] or e["historical_rows"])
+
+    cypher_ctx = [r["context"] for r in usable if r["source"] == "cypher" and _has_rows(r)]
+    vector_ctx = "\n".join(str(r["context"]) for r in usable if r["source"] == "vector" and _has_rows(r))
+    cskg_ctx = "\n".join(str(r["context"]) for r in usable if r["source"] == "cskg" and r["context"])
     cskg_questions = "; ".join(r["question"] for r in windowed if r["source"] == "cskg")
+    failures = [{**r["retrieval"], "question": r["question"], "turn": r.get("turn")}
+                for r in windowed if _retrieval_failed(r)]
+    source_status = _source_status(windowed)
+    if failures:
+        dispatch_retrieval_logger.error(
+            "DEPENDENCY FAILURES this investigation: "
+            + "; ".join(f"{k}={v['status']} ({v['failed']}/{v['questions']})" for k, v in source_status.items()
+                        if v["failed"]))
 
     dispatch_retrieval_logger.info(
         f"accumulated evidence: {len(windowed)} question(s) across "
@@ -403,6 +588,9 @@ async def dispatch_retrieval_node(state: AgentState):
         "log_vector_context": vector_ctx or None,
         "mcp_rdf_context": cskg_ctx or None,
         "generated_question_for_rdf": cskg_questions or "Not applicable for this query.",
+        "dependency_failures": failures,
+        "source_status": source_status,
+        "evidence_index": _build_evidence_index(windowed, case_scope, state.get('case_context')),
     }
 
 
@@ -433,6 +621,17 @@ def review_evidence_node(state: AgentState):
     for r in results:
         if r.get("review"):
             reviewed.append(r)
+            continue
+        if _retrieval_failed(r):
+            # Nothing was retrieved, so there is nothing to judge -- and
+            # asking a model to weigh an error message risks it "ruling
+            # out" a hypothesis that was never tested.
+            failure = r["retrieval"]
+            reviewed.append({**r, "review": {
+                "sufficient": False, "hypothesis_verdict": "inconclusive",
+                "reasoning": f"Not tested: the {r.get('source')} source could not be queried "
+                             f"({failure['error_type']}: {failure['message']})."}})
+            review_evidence_logger.warning(f"output: {r.get('question')!r} -> NOT TESTED (retrieval failed)")
             continue
         review = review_chain.invoke({
             "hypothesis": r.get("hypothesis", ""),
@@ -546,30 +745,86 @@ def _cap_confidence(report, richness: int):
 
 
 # --- Node Definition: Synthesizer ---
+def _render_cypher_context(ctx) -> str:
+    """Scoped results are already rendered text (one block per question);
+    legacy unscoped results are row lists and keep their old str() form."""
+    if not ctx:
+        return _NOT_APPLICABLE
+    if all(isinstance(c, str) for c in ctx):
+        return "\n\n".join(ctx)
+    return str(ctx)
+
+
+def _cskg_has_data(state: AgentState) -> bool:
+    """True if at least one knowledge-base question returned real data.
+    Judged per question: joining the answers first (as mcp_rdf_context
+    does for the prompt) let one "no relevant data" answer mask a second
+    answer that did contain mitigations -- seen in the first live v3 run."""
+    results = [r for r in (state.get('question_results') or []) if r.get("source") == "cskg"]
+    if results:
+        return any(not _retrieval_failed(r) and _mcp_context_has_data(str(r.get("context") or "")) for r in results)
+    return _mcp_context_has_data(str(state.get('mcp_rdf_context') or ""))
+
+
+def _annotate_report(report_dict: dict, state: AgentState) -> dict:
+    """Deterministic facts about the evidence behind a report, written by
+    the workflow rather than left to the model's own account of it."""
+    status = state.get('source_status') or {}
+    failures = state.get('dependency_failures') or []
+    cskg = status.get("cskg") or {}
+    cskg_has_data = _cskg_has_data(state)
+    report_dict["source_status"] = status
+    report_dict["dependency_failures"] = failures
+    report_dict["mitigations_grounded_in_cskg"] = bool(report_dict.get("mitigation_suggestions")) and cskg_has_data
+    if cskg.get("status") == "failed":
+        # The pilot's reports said "Not applicable for this query." here
+        # while every CSKG lookup had timed out.
+        report_dict["cskg_context_summary"] = (
+            "UNAVAILABLE: the cybersecurity knowledge base could not be queried "
+            f"({'; '.join(cskg.get('errors') or ['unknown error'])}). Mitigation suggestions in this report "
+            "are NOT backed by knowledge-base data.")
+    return report_dict
+
+
 def synthesize_node(state: AgentState):
     """Generates the final compiled report for the user (structured output,
     see src/agents/synthesizer_agent.py::SynthesizedReport)."""
-    log_cypher = str(state.get('log_cypher_context')) if state.get('log_cypher_context') else "Not applicable for this query."
+    log_cypher = _render_cypher_context(state.get('log_cypher_context'))
     log_vector = str(state.get('log_vector_context')) if state.get('log_vector_context') else "Not applicable for this query."
     generated_q = str(state.get('generated_question_for_rdf', "Not applicable for this query."))
     hypothesis_summary = _render_hypothesis_summary(state.get('question_results') or [])
     messages = state.get('messages') or []
     turn_no = _current_turn_number(messages)
-    case_context = state.get('case_context') or "N/A"
+    case_context = (state.get('case_context') or "N/A") + (state.get('related_findings_context') or "")
     conversation_context = _render_conversation_context(messages)
-    synthesizer_logger.info("invoked")
+    mode = state.get('investigation_mode') or "full_hypothesis"
+    chain = synthesis_chain if mode in ("full_hypothesis", "single_interpretation") else synthesis_chain_fast
+    failures = state.get('dependency_failures') or []
+    source_status = state.get('source_status') or {}
+    synthesizer_logger.info(f"invoked (mode={mode}, tier={'full' if mode in ('full_hypothesis', 'single_interpretation') else 'fast'})")
 
     if not state.get('mcp_rdf_context') and log_cypher == "Not applicable for this query." and log_vector == "Not applicable for this query.":
-        synthesizer_logger.info("output: no evidence from any source -- returning fallback 'not found' report")
+        if failures:
+            # No evidence because sources FAILED is a different statement
+            # from "nothing relevant exists" -- never report an outage as
+            # a negative finding.
+            analysis = ("No evidence could be retrieved: " + "; ".join(
+                f"{f['source']} failed ({f['error_type']}: {f['message']})" for f in failures) + ".")
+            answer = ("This could not be investigated: the evidence sources failed, so the absence of findings "
+                      "below says nothing about the activity itself. " + analysis)
+        else:
+            analysis = "No data was retrieved from any source."
+            answer = "Sorry, no relevant information could be found for this alert."
+        synthesizer_logger.info(f"output: no evidence from any source -- returning fallback report ({analysis})")
         fallback = SynthesizedReport(
             original_question=state['original_question'],
             cypher_context_summary="Not applicable for this query.",
             vector_context_summary="Not applicable for this query.",
             generated_question_for_rdf="Not applicable for this query.",
             cskg_context_summary="Not applicable for this query.",
-            critical_analysis="No data was retrieved from any source.",
+            critical_analysis=analysis,
             contextual_linkage="Not applicable for this query.",
-            final_answer="Sorry, no relevant information could be found for this alert.",
+            final_answer=answer,
             cited_entities=[],
             mitre_techniques=[],
             confidence="low",
@@ -578,43 +833,69 @@ def synthesize_node(state: AgentState):
         )
         return {
             "answer": fallback.final_answer,
-            "synthesized_report": fallback.model_dump(),
+            # `fallback` tells grounding_check_node this report was written
+            # by the workflow, not a model: it asserts nothing to validate.
+            "synthesized_report": _annotate_report({**fallback.model_dump(), "fallback": True}, state),
             "messages": [AIMessage(content=fallback.final_answer, id=f"turn-{turn_no}-answer")],
         }
 
     # A previous grounding_check pass (see grounding_check_node /
-    # decide_after_grounding below) may have rejected this report for citing
-    # entities not present in context. Bounded to a single retry.
-    is_retry = bool(state.get('grounding_result')) and not state['grounding_result'].get('grounded', True)
+    # decide_after_grounding below) may have rejected this report: cited
+    # entities absent from context, citations outside the case, or claims
+    # their own cited alerts do not support. Bounded to a single retry.
+    previous = state.get('grounding_result') or {}
+    is_retry = bool(previous) and not previous.get('valid', previous.get('grounded', True))
     retry_count = state.get('grounding_retry_count', 0) + (1 if is_retry else 0)
-    retry_note = ""
-    if is_retry:
-        ungrounded = state['grounding_result'].get('ungrounded_entities', [])
+    retry_note = _validation_retry_note(previous) if is_retry else ""
+    if is_retry and not retry_note:
         retry_note = (
             f"\n**IMPORTANT CORRECTION**: A previous draft cited entities not present in the "
-            f"context above: {ungrounded}. Do not repeat that mistake -- only cite entities that "
-            f"literally appear in the context above."
+            f"context above: {previous.get('ungrounded_entities', [])}. Do not repeat that mistake -- only cite "
+            f"entities that literally appear in the context above."
         )
 
-    report = synthesis_chain.invoke({
+    cskg_status = (source_status.get("cskg") or {}).get("status")
+    if state.get('mcp_rdf_context'):
+        mcp_context = str(state['mcp_rdf_context'])
+    elif cskg_status == "failed":
+        mcp_context = ("UNAVAILABLE -- the knowledge base could not be queried (see Retrieval failures). "
+                       "Do not present technique descriptions or mitigations as knowledge-base-backed.")
+    else:
+        mcp_context = _NO_MCP_DATA
+
+    report = chain.invoke({
         "original_question": state['original_question'],
         "hypothesis_summary": hypothesis_summary,
         "log_cypher_context": log_cypher,
         "log_vector_context": log_vector,
         "generated_question_for_rdf": generated_q,
-        "mcp_rdf_context": str(state.get('mcp_rdf_context', "No data was provided from this source.")),
+        "mcp_rdf_context": mcp_context,
+        "retrieval_failures": _render_failures(failures),
         "retry_note": retry_note,
         "case_context": case_context,
         "conversation_context": conversation_context,
     })
 
     richness = _context_richness(log_cypher, log_vector, state.get('mcp_rdf_context'))
-    report = _cap_confidence(report, richness)
+    if state.get('case_scope'):
+        # For a case, a source counts toward confidence only if it returned
+        # evidence from the case itself; historical-only hits say nothing
+        # about what happened here.
+        results = [r for r in (state.get('question_results') or []) if not _retrieval_failed(r)]
+        richness = (
+            int(any(r["source"] == "cypher" and _has_case_evidence(r) for r in results))
+            + int(any(r["source"] == "vector" and _has_case_evidence(r) for r in results))
+            + int(_cskg_has_data(state))
+        )
+    raw_draft = report.model_dump()
+    if state.get('enforcement_policy', 'complete') != 'diagnostic_only':
+        report = _cap_confidence(report, richness)
 
     synthesizer_logger.info(
         f"output: final_answer={report.final_answer!r} confidence={report.confidence} "
         f"priority={report.recommended_priority} mitre_techniques={report.mitre_techniques} "
-        f"cited_entities={report.cited_entities} mitigation_suggestions={report.mitigation_suggestions}"
+        f"cited_entities={report.cited_entities} claims={len(report.claims)} "
+        f"mitigation_suggestions={report.mitigation_suggestions}"
     )
 
     # Grows the set _guaranteed_mitigation_question (question_generation_node)
@@ -625,7 +906,9 @@ def synthesize_node(state: AgentState):
 
     return {
         "answer": report.final_answer,
-        "synthesized_report": report.model_dump(),
+        "synthesized_report": _annotate_report(report.model_dump(), state),
+        "raw_synthesis_draft": raw_draft,
+        "evidence_richness": richness,
         "grounding_retry_count": retry_count,
         "known_mitre_techniques": known_techniques,
         # Same id every time this node runs within one turn (including a
@@ -637,13 +920,54 @@ def synthesize_node(state: AgentState):
 
 
 # --- Node Definition: Grounding Check ---
+_CLAIM_PROBLEMS = {
+    "historical_cited_as_case": "cites an alert that is not part of this case",
+    "unknown_alert": "cites an alert ID that matches no alert",
+    "alert_not_in_evidence": "cites an alert whose content was never retrieved",
+    "no_evidence": "cites no alert",
+    "entity_not_in_cited_evidence": "names something the alerts it cites do not mention",
+    "knowledge_base_unavailable": "relies on the knowledge base, which returned nothing",
+    "partially_supported": "goes beyond what the alerts it cites show",
+    "unsupported": "is not shown by the alerts it cites",
+    "contradicted": "is contradicted by the alerts it cites",
+    "unverified": "could not be verified",
+    "not_found_with_citations": "says nothing was found yet cites alerts",
+}
+
+
+def _claim_problem(claim: dict) -> str:
+    key = claim["structural_issues"][0].split(":", 1)[0] if claim["structural_issues"] else claim["support"]
+    return _CLAIM_PROBLEMS.get(key, key.replace("_", " "))
+
+
+def _validation_notice(result: dict, adjustments: dict) -> str:
+    """Plain-language line appended to the answer when validation changed
+    what the report may assert, so neither the analyst nor a later turn
+    reading the transcript takes an unsupported conclusion as settled."""
+    failed = [c for c in result.get("claims") or [] if not c["valid"]]
+    parts = []
+    if failed:
+        parts.append(f"{len(failed)} of {len(result['claims'])} claim(s) in this answer did not pass validation: "
+                     + "; ".join(f"\"{c['claim']}\" {_claim_problem(c)}" for c in failed[:5]))
+    other = [v["detail"] for v in result.get("violations") or [] if v.get("blocking") and "claim_index" not in v]
+    if other:
+        parts.append("; ".join(other[:3]))
+    for field, change in adjustments.items():
+        parts.append(f"{field.replace('_', ' ')} lowered from {change['from']} to {change['to']} ({change['reason']})")
+    return ("[Validation] " + ". ".join(p.rstrip(".") for p in parts) + ".") if parts else ""
+
+
 def grounding_check_node(state: AgentState):
-    """Verifies the synthesizer's cited entities actually appear in the
-    retrieved context. Non-LLM, cheap."""
+    """Validates the synthesizer's report. Entity presence as before; for
+    case investigations also every claim against the alerts it cites and
+    against case membership. Whether those alerts support each claim is
+    taken from the synthesizer's own rating (no model call here); with
+    EVIDENCE_CLAIM_VERIFIER=llm a separate model call judges it instead."""
     report = state.get('synthesized_report')
     if not report:
         grounding_check_logger.info("no report to check -- treating as grounded")
-        return {"grounding_result": {"grounded": True, "checked_entities": [], "ungrounded_entities": []}}
+        return {"grounding_result": {"grounded": True, "valid": True, "checked_entities": [],
+                                     "ungrounded_entities": [], "violations": [], "claims": []}}
 
     context_blobs = [
         str(state.get('log_cypher_context') or ''),
@@ -666,15 +990,98 @@ def grounding_check_node(state: AgentState):
         # another LLM's output.
         state.get('case_context') or '',
     ]
-    result = check_grounding(report, context_blobs)
-    if result.grounded:
-        grounding_check_logger.info(f"output: grounded=True checked_entities={result.checked_entities}")
+    if report.get('fallback'):
+        grounding_check_logger.info("deterministic no-evidence report -- nothing to validate")
+        return {"grounding_result": {"grounded": True, "valid": True, "final": True, "checked_entities": [],
+                                     "ungrounded_entities": [], "violations": [], "claims": [],
+                                     "claim_verifier": {"status": "not_applicable"}, "case_scoped": False,
+                                     "summary": summarize_claims({})}}
+    case_scope = state.get('case_scope')
+    evidence_index = state.get('evidence_index') or _build_evidence_index(
+        state.get('question_results') or [], case_scope, state.get('case_context'))
+    result = validate_report(
+        report, context_blobs=context_blobs, evidence_index=evidence_index, case_scope=case_scope,
+        cskg_has_data=_cskg_has_data(state))
+
+    verifier = {"status": "not_applicable"}
+    if case_scope and result["claims"]:
+        support_mode = claim_verifier.mode()
+        if support_mode == "off":
+            verifier = {"status": "disabled"}
+        elif support_mode == "self":
+            result = apply_self_assessment(result)
+            verifier = {"status": "self_assessed",
+                        "claims_judged": sum(c.get("support_source") == "self" for c in result["claims"]),
+                        "claims_not_rated": sum(v["type"] == "not_self_assessed" for v in result["violations"])}
+        else:
+            try:
+                verdicts = claim_verifier.verify_claims(result, evidence_index)
+                result = apply_claim_verdicts(result, verdicts)
+                verifier = {"status": "ok", "claims_judged": len(verdicts)}
+            except Exception as e:
+                # The verifier is a dependency too: its failure is recorded,
+                # and claims stay 'unverified' rather than passing silently.
+                verifier = {"status": "failed", "error_type": type(e).__name__, "message": str(e) or "no message"}
+                result = apply_claim_verdicts(result, {})
+                grounding_check_logger.error(f"claim verifier FAILED: {verifier['error_type']}: {verifier['message']}")
+    result["claim_verifier"] = verifier
+    result["summary"] = summarize_claims(result)
+
+    if state.get('enforcement_policy', 'complete') == 'diagnostic_only':
+        result.update(final=True, enforcement='diagnostic_only', adjustments={})
+        return {"grounding_result": result}
+
+    if result["valid"]:
+        grounding_check_logger.info(
+            f"output: valid=True grounded={result['grounded']} checked_entities={result['checked_entities']} "
+            f"claims={result['summary']}")
     else:
         grounding_check_logger.warning(
-            f"output: grounded=False ungrounded_entities={result.ungrounded_entities} "
-            f"checked_entities={result.checked_entities}"
-        )
-    return {"grounding_result": result.model_dump()}
+            f"output: valid=False grounded={result['grounded']} ungrounded_entities={result['ungrounded_entities']} "
+            f"violations={[v['detail'] for v in result['violations']]}")
+
+    # Final for this turn unless decide_after_grounding will send it back
+    # for the single retry. Once final, what the evidence does not support
+    # is taken out of the report's confidence and priority deterministically.
+    final = result["valid"] or state.get('grounding_retry_count', 0) >= 1
+    result["final"] = final
+    update = {"grounding_result": result}
+    if final:
+        adjustments = validation_adjustments(report, result)
+        result["adjustments"] = adjustments
+        notice = _validation_notice(result, adjustments)
+        revised = {**report,
+                   **{field: change["to"] for field, change in adjustments.items()},
+                   "validation": {"valid": result["valid"], "summary": result["summary"], "adjustments": adjustments,
+                                  "citations": result.get("citations"), "claim_verifier": verifier,
+                                  "violations": [v["detail"] for v in result["violations"]]},
+                   "validation_notice": notice}
+        if (not result['valid'] or any(not c['valid'] for c in result['claims'])) and report.get('maliciousness') in ('malicious', 'benign'):
+            revised['maliciousness'] = 'undetermined'
+            revised['uncertainty'] = list(report.get('uncertainty') or []) + [
+                'One or more claims failed validation; the conclusive case assessment is withheld.']
+        if not result['valid'] or any(not c['valid'] for c in result['claims']):
+            # A notice alone leaves the unsupported diagnosis in the headline.
+            # Preserve the draft for audit, but publish only accepted statements.
+            revised['unvalidated_draft'] = {key: report.get(key) for key in
+                                            ('final_answer', 'critical_analysis', 'contextual_linkage')}
+            statements = [f"- [{c['declared_scope']}] {c['claim']}" for c in result['claims']
+                          if c['valid'] and c['support'] == 'supported']
+            revised['final_answer'] = (
+                'Evidence-supported statements:\n' + ('\n'.join(statements) or 'None passed claim validation.')
+                + '\n\nAssessment: parts of the draft could not be validated; no conclusive diagnosis is presented.'
+                + f"\nRecommended action: {revised.get('recommended_priority', 'monitor')}.")
+            revised['critical_analysis'] = 'Unvalidated conclusions withheld; see validation details and saved draft.'
+            revised['contextual_linkage'] = 'Only the accepted claims above may be used as established findings.'
+        update["synthesized_report"] = revised
+        if adjustments:
+            grounding_check_logger.warning(f"validation adjustments applied: {adjustments}")
+        if notice:
+            turn_no = _current_turn_number(state.get('messages') or [])
+            answer = f"{revised.get('final_answer')}\n\n{notice}"
+            update["answer"] = answer
+            update["messages"] = [AIMessage(content=answer, id=f"turn-{turn_no}-answer")]
+    return update
 
 
 # --- Perakitan Graph ---
@@ -698,14 +1105,17 @@ def decide_after_guardrails(state: AgentState):
 
 # 2. Decision after Grounding Check
 def decide_after_grounding(state: AgentState):
+    if state.get('enforcement_policy', 'complete') == 'diagnostic_only':
+        return END
     result = state.get('grounding_result') or {}
-    if result.get('grounded', True):
-        grounding_check_logger.info("routing: grounded -> ending execution")
+    if result.get('valid', result.get('grounded', True)):
+        grounding_check_logger.info("routing: report validated -> ending execution")
         return END
     if state.get('grounding_retry_count', 0) >= 1:
-        grounding_check_logger.warning("routing: still ungrounded after retry -> surfacing as-is (bounded retry)")
+        grounding_check_logger.warning(
+            "routing: still failing validation after retry -> surfacing with validation notice (bounded retry)")
         return END
-    grounding_check_logger.warning("routing: ungrounded -> retrying synthesis once")
+    grounding_check_logger.warning("routing: report failed validation -> retrying synthesis once")
     return "synthesizer"
 
 

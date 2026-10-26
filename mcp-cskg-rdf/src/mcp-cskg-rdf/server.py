@@ -51,11 +51,17 @@ socket.setdefaulttimeout(30)
 try:
     import truststore
     truststore.inject_into_ssl()
+    HAS_TRUSTSTORE = True
 except ImportError:
-    pass
+    HAS_TRUSTSTORE = False  # reported once logging is configured, below
 
 import rdflib
 from openai import OpenAI
+# The module is next to this script for both direct and test-loader execution.
+import importlib.util as _importlib_util
+_eval_spec = _importlib_util.spec_from_file_location("cskg_evaluation_support", os.path.join(os.path.dirname(__file__), "evaluation_support.py"))
+_eval_support = _importlib_util.module_from_spec(_eval_spec)
+_eval_spec.loader.exec_module(_eval_support)
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.server.fastmcp.prompts import base
 
@@ -84,6 +90,23 @@ parser.add_argument("--sparql-endpoint", default="", help="SPARQL endpoint URL (
 args = parser.parse_args()
 
 logger.info("Starting MITRE ATT&CK SPARQL MCP Server v1.0.0")
+if not HAS_TRUSTSTORE:
+    # Previously skipped in silence. Without it this process verifies HTTPS
+    # against Python's default CA store, which the SEPSES endpoint is known
+    # to fail on some builds -- and rdflib then reports that as a malformed
+    # query (see _describe_error below).
+    logger.warning("truststore is not installed: HTTPS certificates are verified against Python's default CA "
+                   "store instead of the operating system's trust store. Install it (it is listed in "
+                   "mcp-cskg-rdf/requirements.txt) if the SPARQL endpoint fails certificate verification.")
+
+
+def _describe_error(exc: BaseException) -> str:
+    """rdflib's SPARQLConnector turns ANY failure to reach the endpoint --
+    DNS, timeout, TLS verification -- into ValueError("You did something
+    wrong formulating either the URI or your SPARQL query"). The real
+    error survives only as the exception's context; include it."""
+    cause = exc.__cause__ or exc.__context__
+    return f"{exc}" + (f" (underlying error: {type(cause).__name__}: {cause})" if cause else "")
 
 # Define namespaces
 ATTACK = rdflib.Namespace("http://w3id.org/sepses/vocab/ref/attack#")
@@ -124,7 +147,7 @@ async def attack_triplestore_lifespan(server: FastMCP, rdf_file: str, sparql_end
             graph.query("SELECT ?s WHERE { ?s ?p ?o } LIMIT 1")
             logger.info(f"Successfully connected to {sparql_endpoint}")
         except Exception as e:
-            logger.error(f"Failed to connect to SPARQL endpoint: {str(e)}")
+            logger.error(f"Failed to connect to SPARQL endpoint: {_describe_error(e)}")
             raise
     else:
         graph = rdflib.Graph()
@@ -140,6 +163,7 @@ async def attack_triplestore_lifespan(server: FastMCP, rdf_file: str, sparql_end
             logger.error(f"Failed to load RDF file: {str(e)}")
             raise    
     try:
+        graph = _eval_support.CachedGraph(graph, sparql_endpoint or str(file_path))
         logger.info("MITRE ATT&CK triplestore initialized successfully")
         yield {
             "graph": graph,
@@ -159,6 +183,93 @@ async def attack_triplestore_lifespan(server: FastMCP, rdf_file: str, sparql_end
 
 MAX_DESCRIPTION_CHARS = 400
 MAX_RESULT_CHARS = 6000  # ~1500 tokens -- keeps a single tool call's context contribution bounded
+MAX_RESULT_ROWS = max(1, int(os.environ.get("CSKG_MAX_RESULT_ROWS", "25")))
+
+
+def _top_level_tokens(query: str):
+    """Yield SPARQL keyword spans outside strings, comments, IRIs and groups."""
+    depth = 0
+    i = 0
+    while i < len(query):
+        char = query[i]
+        if char == "#":
+            newline = query.find("\n", i)
+            i = len(query) if newline < 0 else newline + 1
+            continue
+        if char in "'\"":
+            marker = char * (3 if query.startswith(char * 3, i) else 1)
+            i += len(marker)
+            while i < len(query):
+                if query[i] == "\\":
+                    i += 2
+                elif query.startswith(marker, i):
+                    i += len(marker)
+                    break
+                else:
+                    i += 1
+            continue
+        if char == "<":
+            close = query.find(">", i + 1)
+            whitespace = [p for p in (query.find(" ", i + 1), query.find("\n", i + 1), query.find("\t", i + 1)) if p >= 0]
+            if close >= 0 and close < min(whitespace, default=len(query)):
+                i = close + 1
+                continue
+        if char == "{":
+            depth += 1
+            i += 1
+            continue
+        if char == "}":
+            depth = max(0, depth - 1)
+            i += 1
+            continue
+        if depth == 0 and (char.isalpha() or char == "_"):
+            start = i
+            i += 1
+            while i < len(query) and (query[i].isalnum() or query[i] in "_-"):
+                i += 1
+            yield query[start:i].upper(), start, i
+            continue
+        i += 1
+
+
+def cap_select_query(query: str, max_rows: int = MAX_RESULT_ROWS) -> str:
+    """Apply a hard outer-row cap before a SELECT reaches the SPARQL endpoint.
+
+    Formatting alone is too late for SPARQLStore: it reads the full HTTP
+    response before returning a Result. Existing smaller LIMITs are kept;
+    larger ones are reduced. Nested-subquery LIMITs do not count as the
+    outer limit.
+    """
+    if max_rows < 1:
+        raise ValueError("max_rows must be positive")
+    form_match = re.match(
+        r"(?is)^\s*(?:(?:\#[^\r\n]*(?:\r?\n|$))|(?:PREFIX\s+[\w-]*:\s*<[^>]*>|BASE\s*<[^>]*>)\s*)*(SELECT|ASK|CONSTRUCT|DESCRIBE)\b",
+        query,
+    )
+    if not form_match or form_match.group(1).upper() != "SELECT":
+        return query
+    tokens = list(_top_level_tokens(query))
+
+    limit = next(((start, end) for token, start, end in tokens if token == "LIMIT"), None)
+    if limit:
+        _, end = limit
+        match = re.match(r"\s*(\d+)", query[end:])
+        if match:
+            current = int(match.group(1))
+            if current > max_rows:
+                start = end + match.start(1)
+                stop = end + match.end(1)
+                return query[:start] + str(max_rows) + query[stop:]
+            return query
+
+    offset = next((start for token, start, _ in tokens if token == "OFFSET"), None)
+    if offset is not None:
+        insertion = offset
+    else:
+        # Keep an optional final semicolon after the new solution modifier.
+        end = len(query.rstrip())
+        insertion = end - 1 if end and query.rstrip().endswith(";") else end
+    return query[:insertion].rstrip() + f"\nLIMIT {max_rows}\n" + query[insertion:]
 
 
 def format_sparql_results(results, include_description: bool = False) -> str:
@@ -184,8 +295,15 @@ def format_sparql_results(results, include_description: bool = False) -> str:
         return "No results found."
 
     formatted_results = []
+    rows_truncated = False
 
-    for row in results:
+    for row_index, row in enumerate(results):
+        # Do not materialize or serialize a broad result set just to throw
+        # most of it away at the character limit. Consume one extra row only
+        # to distinguish an exact-size result from a truncated one.
+        if row_index >= MAX_RESULT_ROWS:
+            rows_truncated = True
+            break
         result_parts = []
 
         # Handle different variable bindings
@@ -213,10 +331,15 @@ def format_sparql_results(results, include_description: bool = False) -> str:
             kept.append(line)
             running += len(line) + 1
         omitted = len(formatted_results) - len(kept)
-        output = "\n".join(kept) + (
+        truncation_note = (
             f"\n... [{omitted} more result(s) truncated -- narrow your query "
-            f"(e.g. a more specific keyword/tactic, or include_description=False) to see more]"
+            f"(e.g. a more specific keyword/tactic, or include_description=False) to see more"
         )
+        if rows_truncated:
+            truncation_note += f"; hard row cap is {MAX_RESULT_ROWS}"
+        output = "\n".join(kept) + truncation_note + "]"
+    elif rows_truncated:
+        output += f"\n... [results capped at {MAX_RESULT_ROWS} rows; narrow the query to see a more specific subset]"
     return output
 
 #################################################################
@@ -254,16 +377,17 @@ def execute_sparql_query(query: str, ctx: Context, include_description: bool = F
     """
     graph = ctx.request_context.lifespan_context["graph"]
     start_time = time.time()
+    bounded_query = cap_select_query(query)
     
     try:
-        results = graph.query(query)
+        results = graph.query(bounded_query)
         ctx.request_context.lifespan_context["metrics"]["queries"] += 1
         ctx.request_context.lifespan_context["metrics"]["total_time"] += time.time() - start_time
-        logger.info(query)
+        logger.info(bounded_query)
         return format_sparql_results(results, include_description)
     except Exception as e:
-        logger.error(f"SPARQL query error: {str(e)}")
-        return f"Error executing SPARQL query: {str(e)}"
+        logger.error(f"SPARQL query error: {_describe_error(e)}")
+        return f"Error executing SPARQL query: {_describe_error(e)}"
 
 @mcp.tool()
 def get_server_mode(ctx: Context) -> str:
@@ -427,6 +551,48 @@ def get_techniques_by_keyword(ctx: Context,  keyword: str, include_description: 
     LIMIT 50
     """
     return execute_sparql_query(query, ctx, include_description)
+
+
+@mcp.tool()
+def get_technique_mitigations_by_keyword(keywords: List[str], ctx: Context) -> str:
+    """Find ATT&CK techniques matching a behavior keyword and return their mitigations.
+
+    This is a single bounded graph lookup for technique-mapping questions. It
+    avoids an extra model-powered text-to-SPARQL call and keeps both the
+    technique IDs/titles and mitigation titles grounded in the same result.
+
+    Args:
+        keywords: Up to three concise behavior terms or technique phrases to
+            match against ATT&CK technique titles and descriptions.
+        ctx: FastMCP context object.
+    """
+    terms = [term.strip() for term in keywords if term and term.strip()][:3]
+    if not terms:
+        return "No results found."
+    title_filters = [f"CONTAINS(LCASE(STR(?techniqueLabel)), LCASE({json.dumps(term)}))" for term in terms]
+    description_filters = [f"CONTAINS(LCASE(STR(?description)), LCASE({json.dumps(term)}))" for term in terms]
+    matches = " ||\n            ".join(title_filters + description_filters)
+    title_matches = " || ".join(title_filters)
+    query = f"""
+    PREFIX attack: <http://w3id.org/sepses/vocab/ref/attack#>
+    PREFIX dcterm: <http://purl.org/dc/terms/>
+
+    SELECT DISTINCT ?techniqueId ?techniqueLabel ?mitigationLabel WHERE {{
+        ?technique a attack:Technique ; dcterm:title ?techniqueLabel .
+        OPTIONAL {{ ?technique dcterm:description ?description }}
+        BIND(REPLACE(STR(?technique), "^.*/", "") AS ?techniqueId)
+        FILTER(REGEX(STR(?techniqueId), "^T[0-9]{{4}}(\\\\.[0-9]{{3}})?$"))
+        FILTER({matches})
+        OPTIONAL {{
+            ?technique attack:hasMitigation ?mitigation .
+            ?mitigation dcterm:title ?mitigationLabel .
+        }}
+    }}
+    ORDER BY (IF({title_matches}, 0, 1))
+             ?techniqueLabel ?mitigationLabel
+    LIMIT 10
+    """
+    return execute_sparql_query(query, ctx)
 
 
 @mcp.tool()
@@ -1481,8 +1647,11 @@ def _generate_sparql(question: str) -> Optional[str]:
     if not api_key:
         logger.error("[text_to_sparql] OPENAI_API_KEY not set -- cannot generate a query")
         return None
+    import uuid
+    call_id = uuid.uuid4().hex
+    _eval_support.event('llm_started', call_id=call_id, model='gpt-4o', provider='openai')
     try:
-        client = OpenAI(api_key=api_key)
+        client = OpenAI(api_key=api_key, **({'max_retries': 0, 'timeout': 45} if os.environ.get('PROPOSAL_TELEMETRY_PATH') else {}))
         response = client.chat.completions.create(
             model="gpt-4o",
             temperature=0,
@@ -1500,8 +1669,12 @@ def _generate_sparql(question: str) -> Optional[str]:
                 {"role": "user", "content": question},
             ],
         )
+        _eval_support.event('llm_completed', call_id=call_id, model=response.model,
+            input_tokens=response.usage.prompt_tokens if response.usage else None,
+            output_tokens=response.usage.completion_tokens if response.usage else None)
         raw = (response.choices[0].message.content or "").strip()
     except Exception as e:
+        _eval_support.event('llm_failed', call_id=call_id, error_type=type(e).__name__)
         logger.error(f"[text_to_sparql] SPARQL generation call failed: {e}")
         return None
 

@@ -1,4 +1,5 @@
-import { apiRequest, type SendChatMessageParams, type TurnRecord } from "./client";
+import { apiRequest, type InvestigationProgressEvent, type SendChatMessageParams, type TurnRecord } from "./client";
+import { runWithInvestigationEventStream } from "./investigation-events";
 import { createDemoChatTurn, demoDelay, isDemoMode } from "@/demo/demo-data";
 
 export function sendChatMessage(input: string | SendChatMessageParams, message?: string): Promise<TurnRecord> {
@@ -9,4 +10,18 @@ export function sendChatMessage(input: string | SendChatMessageParams, message?:
     method: "POST", endpointKey: "sendChatMessage", isInvestigation: true, caseId,
     body: { message: chatMessage },
   });
+}
+
+export function sendChatMessageStream(
+  caseId: string,
+  message: string,
+  onEvent: (event: InvestigationProgressEvent) => void,
+): Promise<TurnRecord> {
+  if (isDemoMode()) return sendChatMessage(caseId, message);
+  return runWithInvestigationEventStream(
+    caseId,
+    () => sendChatMessage(caseId, message),
+    onEvent,
+    () => sendChatMessage(caseId, message),
+  );
 }
