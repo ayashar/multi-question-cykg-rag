@@ -165,6 +165,23 @@ question_generation_chain = question_generation_prompt | structured_model(llm, Q
 # generate_questions() below routes them to the cheaper model.
 question_generation_chain_fast = question_generation_prompt | structured_model(fast_llm, QuestionSet)
 
+# One interpretation uses the SAME full model as the multi-hypothesis arm.
+# Reuse the source capability rules but replace differential-diagnosis directives.
+_single_system = question_generation_prompt.messages[0].prompt.template
+_single_rules = _single_system[_single_system.index("Rules for tagging"):]
+_single_rules = _single_rules[:_single_rules.index("Always include at least one benign")]
+single_interpretation_prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a SOC analyst. Commit to the single most likely explanation of this "
+     "activity case. Generate exactly ONE targeted question to investigate that explanation. "
+     "Do not generate alternative hypotheses or extra mitigation questions.\n\n" + _single_rules),
+    ("human", "Case: {alert_summary}\nEvidence: {case_context}\nPrior conversation: {conversation_context}"),
+])
+
+class SingleQuestionSet(BaseModel):
+    questions: List[GeneratedQuestion] = Field(min_length=1, max_length=1)
+
+single_interpretation_chain = single_interpretation_prompt | structured_model(llm, SingleQuestionSet)
+
 _MODE_INSTRUCTIONS = {
     "full_hypothesis": (
         "Mode: full_hypothesis. Produce the full 3-to-5-question hypothesis set as usual, covering "
@@ -194,6 +211,10 @@ def generate_questions(
     question_generation_node. `mode` is guardrails_agent.py's
     investigation_mode decision ('answer_from_context' never reaches here --
     question_generation_node skips this call entirely in that case)."""
+    if mode == "single_interpretation":
+        return single_interpretation_chain.invoke({
+            "alert_summary": alert_summary, "case_context": case_context,
+            "conversation_context": conversation_context})
     chain = question_generation_chain if mode == "full_hypothesis" else question_generation_chain_fast
     return chain.invoke({
         "alert_summary": alert_summary,

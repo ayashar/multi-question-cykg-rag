@@ -11,6 +11,8 @@ Routes:
   POST /cases/{case_id}/investigate    launch/resume a case's investigation
   GET  /cases/{case_id}/attack-graph   reconstructed attack graph for a case
   POST /investigations/time-range      launch/resume an ad-hoc time-range investigation
+  GET  /investigations                 past conversations, most recent first (to resume one)
+  GET  /investigations/{case_id}       one conversation's summary (incl. whether it can be resumed)
   POST /investigations/{case_id}/chat  ask a follow-up in an open investigation
   GET  /investigations/{case_id}/chat  read an investigation's transcript (add ?include_trace=true for the full trace)
   GET  /investigations/{case_id}/turns/{turn_index}/trace  how one turn reached its answer
@@ -29,9 +31,14 @@ time it's (re)started.
 Frontend access: browsers can't set headers on an EventSource, so the events
 route also accepts the key as `?api_key=` (that route only). Cross-origin
 browser calls are allowed from INVESTIGATION_CORS_ORIGINS (comma-separated;
-default: the usual local dev servers on ports 3000 and 5173). Past turns are
-reloaded from data/investigations.jsonl at startup and stay readable; a
-reloaded case cannot take follow-ups (409) because its pipeline state is gone.
+default: the usual local dev servers on ports 3000 and 5173).
+
+Resuming a conversation: past turns are reloaded from data/investigations.jsonl
+at startup, and each case's pipeline state is saved under data/checkpoints/
+after every turn (see session.py), so a follow-up on a reloaded case simply
+continues it. List conversations with GET /investigations, check
+`resumable`, read the transcript with GET .../chat, then POST .../chat as
+usual. Only cases investigated before state was saved return 409.
 
 Access control: see SECURITY_ASSESSMENT.md. Set INVESTIGATION_API_KEY to
 require a matching `X-API-Key` header on every request -- unset (the local-
@@ -145,6 +152,19 @@ async def investigate_time_range(body: TimeRangeRequest) -> session.TurnRecord:
         raise HTTPException(status_code=404, detail=f"No alerts found between {body.start} and {body.end}.")
     alerts = clustering.fetch_alerts_by_ids(case.alert_ids)
     return await session.start_investigation(case, alerts)
+
+
+@app.get("/investigations")
+async def list_investigations() -> list[session.InvestigationSummary]:
+    return session.list_investigations()
+
+
+@app.get("/investigations/{case_id}")
+async def get_investigation(case_id: str) -> session.InvestigationSummary:
+    summary = session.summarize(case_id)
+    if summary is None:
+        raise HTTPException(status_code=404, detail=f"No investigation started for case {case_id} yet.")
+    return summary
 
 
 @app.post("/investigations/{case_id}/chat")

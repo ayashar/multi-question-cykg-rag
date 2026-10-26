@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 # --- Konfigurasi dan Inisialisasi Agen MCP ---
 
 _mcp_client = None
+MCP_MAX_STEPS = max(1, int(os.environ.get("CSKG_MCP_MAX_STEPS", "5")))
+MCP_MAX_RESULT_ROWS = max(1, int(os.environ.get("CSKG_MAX_RESULT_ROWS", "10")))
 
 def get_mcp_client():
     """Inisialisasi dan mengembalikan MCPClient (hanya sekali).
@@ -84,6 +86,24 @@ def last_readiness_report():
     """Most recent readiness probe result for this process, or None."""
     return _readiness["report"]
 
+
+def _ensure_step_budget_not_exhausted(steps_taken: int, max_steps: int) -> None:
+    """Reject a returned-but-truncated answer when the tool loop hit its cap."""
+    if steps_taken >= max_steps:
+        raise CskgDependencyError(
+            f"CSKG agent exhausted its {max_steps}-step tool budget before confirming a complete answer",
+            stage="agent_step_limit",
+        )
+
+
+def _is_technique_mitigation_question(question: str) -> bool:
+    text = question.lower()
+    return 'mitigation' in text or ('att&ck' in text and 'technique' in text)
+
+
+def _disallow_tools_except(tool_names, allowed_name: str) -> list[str]:
+    return [name for name in tool_names if name != allowed_name]
+
 # Exact marker MAX_STEPS-exhausted/nothing-found responses must start
 # with -- src/graph/workflow.py::_context_richness matches on this (plus a
 # phrase-based heuristic fallback for whenever the model doesn't follow
@@ -96,6 +116,10 @@ NO_DATA_MARKER = "NO_RELEVANT_DATA_FOUND"
 
 strict_system_prompt = f"""
 You are a specialized cybersecurity assistant. You MUST answer questions ONLY by using the provided tools. Your only source of information is the knowledge graph accessed via tools.
+
+Keep retrieval bounded: use the fewest tool calls that can answer the question, prefer one precise lookup, and do not request exhaustive lists. If a call times out, do not repeat the same query; make at most one narrower fallback. The tool loop is limited to {MCP_MAX_STEPS} steps, and each result is capped at {MCP_MAX_RESULT_ROWS} rows.
+
+When asked to map observed behavior to ATT&CK techniques and/or recommend mitigations, use get_technique_mitigations_by_keyword with a list of up to three concise phrases drawn from the observed signals (for example, the relevant service behavior, a scan/banner phrase, and a DNS query type). Make one call; only if it returns no results, make one fallback call with alternate short phrases. It returns bounded technique IDs/titles and linked mitigation titles. Never use text_to_sparql for these tasks: it makes a separate hard-coded OpenAI GPT-4o API call, bypassing the configured OpenRouter model/provider. Do not replace graph evidence with memory, or search technique and mitigation tools separately.
 
 This knowledge base ONLY contains public reference data: MITRE ATT&CK techniques/tactics/groups/software/mitigations,
 and CVE/CVSS records. It has NO IP addresses, hostnames, domains, live threat-intelligence feeds, IOC reputation data,
@@ -116,7 +140,7 @@ text_to_sparql to write a single query that filters on the ID directly (FILTER(S
 Your thought process MUST be:
     1.  **Analyze the user's question** to understand the core intent.
     2.  **Select the best tool.**.
-    3.  **Execute the tool.**  If that fails or the question is complex, use `text_to_sparql` to convert the question into a precise SPARQL query.
+    3.  **Execute the tool.** Prefer one precise lookup. If it fails, do not repeat the same query; use at most one narrower `text_to_sparql` fallback.
     4.  **Analyze the result.**
         - If the result is a **validation error** (like a Pydantic error), it means you provided the wrong arguments to the tool. Read the error message carefully. DO NOT use the same tool with the exact same arguments again. Correct the arguments and retry. For tools requiring `ctx`, DO NOT provide a value for it; the system handles it.
         - If the result is **empty or "not found"**, the information may not exist, or your query was too narrow. Try rephrasing your input for the tool, perhaps using a broader term.
@@ -151,15 +175,40 @@ async def run_mcp_agent(question: str) -> str:
     try:
         client = get_mcp_client()  # imports mcp_use as a side effect -- see module docstring
         from mcp_use import MCPAgent
+        tool_limited = _is_technique_mitigation_question(question)
+        disallowed_tools = []
+        agent_steps = MCP_MAX_STEPS
+        if tool_limited:
+            # A focused ATT&CK mapping query has a single purpose-built tool.
+            # Discover its registered name first, then hide the other 42
+            # options from the agent so it cannot spend its budget on broad
+            # searches or text_to_sparql's separate OpenAI API call.
+            if not client.get_all_active_sessions():
+                await client.create_all_sessions()
+            tool_names = []
+            for session in client.get_all_active_sessions().values():
+                tool_names.extend(tool.name for tool in await session.connector.list_tools())
+            allowed = "get_technique_mitigations_by_keyword"
+            if allowed not in tool_names:
+                raise CskgDependencyError(
+                    f"Required MCP tool is unavailable: {allowed}", stage="agent_tool_missing")
+            disallowed_tools = _disallow_tools_except(tool_names, allowed)
+            agent_steps = min(MCP_MAX_STEPS, 3)  # one lookup, one fallback, one final response
         agent = MCPAgent(
             llm=llm,
             client=client,
-            max_steps=30,
+            max_steps=agent_steps,
             verbose=True,
-            system_prompt=strict_system_prompt
+            system_prompt=strict_system_prompt,
+            disallowed_tools=disallowed_tools,
         )
         generator = agent.stream(question, track_execution=False)
         result, steps_taken, tools_used_names = await agent._consume_and_return(generator)
+        # mcp_use returns its current text when max_steps is reached. That
+        # text can omit required parts of the answer (for example,
+        # mitigations after several broad searches), so it must not be
+        # accepted as a successful graph lookup.
+        _ensure_step_budget_not_exhausted(steps_taken, agent_steps)
         if tools_used_names:
             logger.info(f"[mcp_rdf_agent] question={question!r} steps={steps_taken} tools_used={tools_used_names}")
         else:

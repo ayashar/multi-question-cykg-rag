@@ -69,7 +69,8 @@ SERVER_IMPORTS = ("mcp.server.fastmcp", "rdflib", "rdflib.plugins.stores.sparqls
 # mcp-cskg-rdf/requirements.txt but was missing from the project's own
 # pyproject.toml, so an environment built from uv.lock did not have it.
 OPTIONAL_SERVER_IMPORTS = ("truststore",)
-REQUIRED_TOOLS = ("get_technique_by_id", "get_mitigations_for_technique", "text_to_sparql", "health_check")
+REQUIRED_TOOLS = ("get_technique_by_id", "get_mitigations_for_technique",
+                  "get_technique_mitigations_by_keyword", "text_to_sparql", "health_check")
 PROBE_TECHNIQUE_ID, PROBE_TECHNIQUE_NAME = "T1071", "Application Layer Protocol"
 
 _SF_DATALESS = 0x40000000  # macOS: file content is not on disk (cloud placeholder)
@@ -111,6 +112,15 @@ def load_server_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
     for spec in servers.values():
         spec["command"] = override or _substitute(str(spec.get("command", "")))
         spec["args"] = [_substitute(str(a)) for a in spec.get("args", [])]
+        # MCP stdio transports may whitelist inherited environment variables.
+        # These values are stage-specific and must reach the stdio server
+        # process explicitly: MCP clients may launch it with a restricted
+        # environment rather than inheriting the full parent environment.
+        # In particular, without CSKG_MAX_RESULT_ROWS the server silently
+        # falls back to 25 rows even though the evaluator is configured for 10.
+        for key in ('PROPOSAL_TELEMETRY_PATH', 'PROPOSAL_CSKG_CACHE', 'CSKG_MAX_RESULT_ROWS'):
+            if os.environ.get(key):
+                spec.setdefault('env', {})[key] = os.environ[key]
     return config
 
 
@@ -359,17 +369,19 @@ async def _session_stages(spec: Dict[str, Any], *, handshake_timeout: float, cal
                     technique = _tool_text(await asyncio.wait_for(session.call_tool(
                         "get_technique_by_id", {"technique_id": PROBE_TECHNIQUE_ID, "include_description": False}),
                         call_timeout))
-                    mitigations = _tool_text(await asyncio.wait_for(session.call_tool(
-                        "get_mitigations_for_technique", {"technique_name": PROBE_TECHNIQUE_NAME}), call_timeout))
+                    mapping = _tool_text(await asyncio.wait_for(session.call_tool(
+                        "get_technique_mitigations_by_keyword", {"keywords": [
+                            PROBE_TECHNIQUE_NAME, "Network Service Scanning", "Active Scanning"]}), call_timeout))
                     problems = []
                     if PROBE_TECHNIQUE_NAME.lower() not in technique.lower():
                         problems.append(f"get_technique_by_id({PROBE_TECHNIQUE_ID}) returned {technique[:160]!r}")
-                    if not mitigations.strip() or mitigations.startswith(("Error", "No results")):
-                        problems.append(f"get_mitigations_for_technique returned {mitigations[:160]!r}")
+                    if (PROBE_TECHNIQUE_NAME.lower() not in mapping.lower() or
+                            not any(word in mapping.lower() for word in ("mitigation", "filter network traffic"))):
+                        problems.append(f"get_technique_mitigations_by_keyword returned {mapping[:160]!r}")
                     stages.append(_stage(
                         "lookup", not problems, started,
                         "; ".join(problems) or f"{PROBE_TECHNIQUE_ID} resolved to '{PROBE_TECHNIQUE_NAME}' with "
-                                               f"{len(mitigations.splitlines())} mitigation row(s)",
+                                               f"{len(mapping.splitlines())} technique/mitigation row(s)",
                         remediation="The server runs but the knowledge graph returned no data; check the SPARQL "
                                     "endpoint's contents."))
         except BaseException as exc:  # includes TimeoutError and anyio's exception groups
