@@ -52,6 +52,20 @@ test("time-range request errors use the compact feature-specific state", () => {
   assert.match(emptyRange, /Adjust the start or end time/);
 });
 
+test("investigation proxy outages are not mislabeled as pipeline failures", () => {
+  const html = renderToStaticMarkup(
+    <ApiErrorView
+      error={new ApiClientError(502, "Bad Gateway", "The investigation API is unavailable.", "/backend/cases/case-1/investigate")}
+      caseId="case-1"
+      onRetry={() => {}}
+    />,
+  );
+  assert.match(html, /Backend Unreachable/);
+  assert.match(html, /case-1/);
+  assert.match(html, /The investigation API is unavailable/);
+  assert.doesNotMatch(html, /Pipeline Failure/);
+});
+
 test("404 preserves backend detail and expands rather than narrowing a wide window", () => {
   const html = renderToStaticMarkup(<CaseNotFoundError errorDetail="Case missing within lookback_hours=8760. Reuse your original window." onRetryWithLookback={() => {}} />);
   assert.match(html, /Reuse your original window/);

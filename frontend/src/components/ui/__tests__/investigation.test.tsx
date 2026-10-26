@@ -7,6 +7,7 @@ import CaseDetails from "@/modules/investigation/components/case-details";
 import InvestigationReport from "@/modules/investigation/components/investigation-report";
 import { buildGraphLayout, MiniAttackGraph } from "@/modules/investigation/components/attack-graph-preview";
 import type { Case, CaseAttackGraph, TurnRecord } from "@/api";
+import MarkdownContent from "../markdown-content";
 
 test("live agent events control progress and expose completed logs", () => {
   const events = [
@@ -82,6 +83,21 @@ test("failed report content and download actions are suppressed, null fields sta
   assert.match(successful, /Download report/);
   assert.match(successful, /Not provided/);
   assert.doesNotMatch(successful, /No threats found/);
+
+  const lowConfidence = renderToStaticMarkup(<InvestigationReport value={value} turn={{ ...turn, confidence: "low" }} />);
+  const highConfidence = renderToStaticMarkup(<InvestigationReport value={value} turn={{ ...turn, confidence: "high" }} />);
+  assert.match(lowConfidence, /bg-red-50/);
+  assert.match(highConfidence, /bg-green-50/);
+  assert.doesNotMatch(lowConfidence, /bg-green-50/);
+});
+
+test("investigation Markdown is rendered as readable content", () => {
+  const html = renderToStaticMarkup(<MarkdownContent value={"## Findings\n\n**Suspicious** activity\n\n- Review the host\n- Check `SNI`"} />);
+  assert.match(html, /<h2[^>]*>Findings<\/h2>/);
+  assert.match(html, /<strong>Suspicious<\/strong>/);
+  assert.match(html, /<li>Review the host<\/li>/);
+  assert.match(html, /<code[^>]*>SNI<\/code>/);
+  assert.doesNotMatch(html, /\*\*Suspicious\*\*/);
 });
 
 test("attack graph layout anchors the backend root cause and fans out related nodes", () => {
@@ -112,4 +128,6 @@ test("attack graph layout anchors the backend root cause and fans out related no
   assert.match(preview, /Attack graph preview with 3 nodes and 2 relationships/);
   assert.match(preview, /Preview · Open the full graph to zoom and move/);
   assert.match(preview, /Suspicious POST/);
+  assert.match(preview, /Graph legend/);
+  assert.match(preview, /MITRE technique/);
 });

@@ -96,4 +96,6 @@ test("live source configuration uses neutral loading copy", () => {
   assert.match(html, /Loading source configuration/);
   assert.doesNotMatch(html, /Loading demo configuration/);
   assert.doesNotMatch(html, /Demo configuration saved/);
+  assert.match(html, /Saving does not start or restart ingestion/);
+  assert.match(html, /restart the separate ingestion process manually/);
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, Database, LoaderCircle, Save } from "lucide-react";
+import { CheckCircle2, Database, LoaderCircle, Save, TriangleAlert } from "lucide-react";
 import { getIngestionConfig, getIngestionStatus, updateIngestionConfig, type IngestionConfig, type IngestionStatus } from "@/api";
 import { Button } from "@/components/ui/button";
 import { ApiErrorView } from "@/components/ui/error-states";
@@ -126,6 +126,15 @@ export default function SourceConfigurationPage() {
         <h1 className="mt-1 font-h4 font-bold tracking-tight text-neutral-1000">Source configuration.</h1>
         <p className="font-b2 text-neutral-800">Preview and edit the alert source used by the ingestion process.</p>
       </div>
+
+      <aside role="note" aria-labelledby="ingestion-restart-title" className="flex items-start gap-3 rounded-[4px] border border-yellow-300 bg-yellow-100/35 p-4 text-yellow-800">
+        <TriangleAlert aria-hidden="true" className="mt-0.5 size-5 shrink-0" />
+        <div className="space-y-1">
+          <h2 id="ingestion-restart-title" className="font-b1 font-semibold">Saving does not start or restart ingestion</h2>
+          <p className="font-b2 text-neutral-900">Changes are stored for the next run. An operator must restart the separate ingestion process manually before the new configuration is used.</p>
+          <p className="font-b3 text-neutral-800">This source replays alerts from a file; it is not a live SIEM connection.</p>
+        </div>
+      </aside>
 
       {process.env.NEXT_PUBLIC_USE_MOCK === "true" && <div className="rounded-[3px] border border-primary-300 bg-primary-100/50 px-4 py-3 font-b2 text-primary-900">Demo mode · changes stay in frontend memory and no backend request is sent.</div>}
       {loading && <p role="status" aria-live="polite" className="flex items-center gap-2 font-b2"><LoaderCircle className="size-4 animate-spin" aria-hidden="true" />{isDemoMode ? "Loading demo configuration…" : "Loading source configuration…"}</p>}

@@ -2,15 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowUp, ChevronDown, FileText, LoaderCircle } from "lucide-react";
-import type { Case, TurnRecord } from "@/api";
+import type { Case, InvestigationProgressEvent, TurnRecord } from "@/api";
 import { ButtonLink } from "@/components/ui/button";
 import { TurnResult } from "@/components/ui/error-states";
+import MarkdownContent from "@/components/ui/markdown-content";
 import {
   createChatroomCase,
   createInitialChatTurns,
   createMockFollowUpTurn,
 } from "../data/chatroom-fixture";
 import InvestigationReport from "./investigation-report";
+import ConfidenceBadge from "./confidence-badge";
 
 function QuestionBubble({ children }: { children: ReactNode }) {
   return (
@@ -23,14 +25,12 @@ function QuestionBubble({ children }: { children: ReactNode }) {
 function AnswerBubble({ turn }: { turn: TurnRecord }) {
   return (
     <article className="max-w-[calc(100%_-_24px)] space-y-3 rounded-[4px] border-l-3 border-black-600 bg-neutral-800 px-2.5 py-2.5 text-neutral-200 sm:max-w-[calc(100%_-_280px)]">
-      <p className="font-b1 whitespace-pre-wrap wrap-anywhere">
-        {turn.answer || "No narrative was returned for this response."}
-      </p>
+      <MarkdownContent value={turn.answer || "No narrative was returned for this response."} className="font-b1" />
 
       {turn.critical_analysis && (
         <section className="space-y-1 border-t border-neutral-700 pt-2">
           <h3 className="font-b3 font-semibold uppercase tracking-wide">Critical analysis</h3>
-          <p className="font-b2 whitespace-pre-wrap wrap-anywhere">{turn.critical_analysis}</p>
+          <MarkdownContent value={turn.critical_analysis} className="font-b2" />
         </section>
       )}
 
@@ -46,7 +46,7 @@ function AnswerBubble({ turn }: { turn: TurnRecord }) {
       <dl className="flex flex-wrap gap-x-6 gap-y-1 border-t border-neutral-700 pt-2 font-b3">
         <div className="flex gap-1.5">
           <dt className="text-neutral-400">Confidence</dt>
-          <dd className="font-semibold capitalize">{turn.confidence ?? "Not provided"}</dd>
+          <dd><ConfidenceBadge confidence={turn.confidence} /></dd>
         </div>
         <div className="flex gap-1.5">
           <dt className="text-neutral-400">Priority</dt>
@@ -54,6 +54,86 @@ function AnswerBubble({ turn }: { turn: TurnRecord }) {
         </div>
       </dl>
     </article>
+  );
+}
+
+function FullActivityLog({
+  events,
+  defaultOpen = false,
+}: {
+  events: InvestigationProgressEvent[];
+  defaultOpen?: boolean;
+}) {
+  const fullLog = events.filter((event) => (
+    (event.type === "agent" && event.status === "complete" && (event.label || event.messages?.length)) ||
+    (event.type === "log" && event.message) ||
+    event.type === "error"
+  ));
+
+  if (!fullLog.length) return null;
+
+  return (
+    <details open={defaultOpen} className="mt-3 rounded-[4px] border border-primary-200 bg-background/60">
+      <summary className="cursor-pointer px-2.5 py-2 font-b3 font-semibold text-primary-800">
+        Full activity log ({fullLog.length} events)
+      </summary>
+      <ol className="max-h-56 space-y-2 overflow-y-auto border-t border-primary-200 px-2.5 py-2" aria-label="Full response activity log">
+        {fullLog.map((event, index) => (
+          <li key={`${event.type}-${event.agent ?? "system"}-${event.timestamp}-${index}`} className="border-l-2 border-primary-300 pl-2">
+            {event.type === "agent" ? (
+              <>
+                <p className="font-b3 font-semibold text-primary-900">{event.label}</p>
+                {event.messages?.map((message, messageIndex) => (
+                  <p key={`${message}-${messageIndex}`} className="font-mono text-[11px] leading-relaxed text-primary-800 wrap-anywhere">{message}</p>
+                ))}
+              </>
+            ) : event.type === "error" ? (
+              <p className="font-mono text-[11px] leading-relaxed text-red-500 wrap-anywhere">{event.message}</p>
+            ) : (
+              <p className="font-mono text-[11px] leading-relaxed text-primary-800 wrap-anywhere">
+                {event.agent ? `[${event.agent}] ` : ""}{event.message}
+              </p>
+            )}
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
+function ChatActivity({ events }: { events: InvestigationProgressEvent[] }) {
+  const latestAgent = [...events]
+    .reverse()
+    .find((event) => event.type === "agent" && event.status === "running");
+  const completedAgents = events.filter((event) => event.type === "agent" && event.status === "complete");
+  const latestLog = [...events].reverse().find((event) => event.type === "log" && event.message);
+
+  return (
+    <section
+      aria-label="Live response activity"
+      aria-live="polite"
+      className="rounded-[6px] border border-primary-200 bg-background/45 p-3"
+    >
+      <div className="flex items-center gap-2">
+        <LoaderCircle aria-hidden="true" className="size-4 shrink-0 animate-spin text-primary-700" />
+        <p className="font-b2 font-semibold">
+          {latestAgent?.label ? `${latestAgent.label} is working…` : "Preparing response…"}
+        </p>
+        <span className="ml-auto rounded-full bg-primary-100 px-2 py-0.5 font-b3 text-primary-800">Live</span>
+      </div>
+
+      {latestLog?.message ? (
+        <p className="mt-2 border-l-2 border-primary-300 pl-2 font-mono text-[11px] leading-relaxed text-primary-800 wrap-anywhere">
+          {latestLog.message}
+        </p>
+      ) : completedAgents.length > 0 ? (
+        <p className="mt-2 font-b3 text-primary-800">{completedAgents.length} processing step{completedAgents.length === 1 ? "" : "s"} completed.</p>
+      ) : (
+        <p className="mt-2 font-b3 text-primary-800">Waiting for the investigation service to report progress.</p>
+      )}
+
+      <FullActivityLog events={events} defaultOpen />
+    </section>
   );
 }
 
@@ -80,16 +160,19 @@ export default function InvestigationChatroom({
   hasInvestigation?: boolean;
   value?: Case;
   initialTurns?: TurnRecord[];
-  onSendQuestion?: (question: string) => Promise<TurnRecord>;
+  onSendQuestion?: (question: string, onProgress: (event: InvestigationProgressEvent) => void) => Promise<TurnRecord>;
 }) {
   const investigationReady = hasInvestigation;
   const value = useMemo(() => providedValue ?? createChatroomCase(caseId), [caseId, providedValue]);
   const [turns, setTurns] = useState(() => initialTurns ?? createInitialChatTurns(caseId));
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [chatEvents, setChatEvents] = useState<InvestigationProgressEvent[]>([]);
+  const [chatLogs, setChatLogs] = useState<Record<number, InvestigationProgressEvent[]>>({});
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chatEventsRef = useRef<InvestigationProgressEvent[]>([]);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => () => {
@@ -115,15 +198,23 @@ export default function InvestigationChatroom({
     setDraft("");
     setIsSending(true);
     setPendingQuestion(question);
+    setChatEvents([]);
+    chatEventsRef.current = [];
     setSendError(null);
+
+    const onProgress = (event: InvestigationProgressEvent) => {
+      chatEventsRef.current = [...chatEventsRef.current, event];
+      setChatEvents(chatEventsRef.current);
+    };
 
     try {
       const response = onSendQuestion
-        ? await onSendQuestion(question)
+        ? await onSendQuestion(question, onProgress)
         : await new Promise<TurnRecord>((resolve) => {
             timeoutRef.current = setTimeout(() => resolve(createMockFollowUpTurn(caseId, nextIndex, question)), 900);
           });
       setTurns((current) => [...current, response]);
+      setChatLogs((current) => ({ ...current, [response.turn_index]: chatEventsRef.current }));
     } catch {
       setSendError("The follow-up response could not be loaded. Try again.");
     } finally {
@@ -168,18 +259,17 @@ export default function InvestigationChatroom({
                   <TurnResult turn={turn} onRetry={() => void sendQuestion(turn.question)}>
                     <AnswerBubble turn={turn} />
                   </TurnResult>
+                  <FullActivityLog events={chatLogs[turn.turn_index] ?? []} />
                 </div>
               ))}
               {isSending && (
                 <div className="space-y-3">
                   {pendingQuestion && <QuestionBubble>{pendingQuestion}</QuestionBubble>}
-                  <div role="status" className="flex items-center gap-2 text-neutral-800">
-                    <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
-                    <span className="font-b2">Preparing response… Usually takes 5–20 seconds.</span>
-                  </div>
+                  <ChatActivity events={chatEvents} />
                 </div>
               )}
               {sendError && <p role="alert" className="font-b2 text-red-500">{sendError}</p>}
+              {!isSending && sendError && <FullActivityLog events={chatEvents} defaultOpen />}
               <div ref={transcriptEndRef} aria-hidden="true" />
             </div>
 

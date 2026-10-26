@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowUpRight, FileText, GitMerge, LayoutGrid, LoaderCircle, MessageSquare, ScrollText } from "lucide-react";
-import { ApiClientError, resolveCaseLookback, sendChatMessage, type Case, type InvestigationProgressEvent, type TurnRecord } from "@/api";
+import { ApiClientError, resolveCaseLookback, sendChatMessageStream, type Case, type InvestigationProgressEvent, type TurnRecord } from "@/api";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { ApiErrorView, CaseNotFoundError, TurnResult } from "@/components/ui/error-states";
 import { InvestigationLoader, InvestigationLog } from "@/components/ui/investigation-loader";
@@ -221,7 +221,7 @@ export default function CaseInvestigation({
           ? <CaseNotFoundError caseId={caseId} lookbackHours={lookbackHours} errorDetail={error.detail}
               onBackToCases={() => router.push("/cases")}
               onRetryWithLookback={(hours) => router.replace(getInvestigationHref(caseId, hours))} />
-          : <ApiErrorView error={error} onRetry={retry} />
+          : <ApiErrorView error={error} caseId={caseId} onRetry={retry} />
       )}
 
       <div ref={content} tabIndex={-1} className="space-y-5 outline-none" aria-label={`${views.find((item) => item.id === view)?.label} content`}>
@@ -262,7 +262,7 @@ export default function CaseInvestigation({
               caseId={caseId}
               value={value}
               initialTurns={[turn]}
-              onSendQuestion={(question) => sendChatMessage(caseId, question)}
+              onSendQuestion={(question, onProgress) => sendChatMessageStream(caseId, question, onProgress)}
             />
           </div>
           {view === "log" && <InvestigationLog events={progressEvents} />}
