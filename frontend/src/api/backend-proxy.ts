@@ -1,5 +1,9 @@
 const DEFAULT_BACKEND_URL = "http://127.0.0.1:8000";
-const REQUEST_TIMEOUT_MS = 120_000;
+// A live investigation is synchronous on the backend while its agents run.
+// With the free OpenRouter route plus Neo4j retrieval, a cold run can take
+// several minutes; 120s caused the Next proxy to return 504 while the
+// backend was still making progress (the SSE stream remained alive).
+const REQUEST_TIMEOUT_MS = 600_000;
 const EVENT_STREAM_TIMEOUT_MS = 660_000;
 
 const requestHeadersToForward = ["accept", "content-type"] as const;

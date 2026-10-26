@@ -40,17 +40,18 @@ graph's edges -- both are node-internal short-circuits, not new routing:
   directive over a case a human already selected, not a question needing
   triage.
 - `state['investigation_mode']` (guardrails_agent.py's per-turn routing
-  decision, meaningful on follow-up turns): 'full_hypothesis' behaves
-  exactly as described above; 'direct_question' asks
-  question_generation_node for exactly one targeted question instead of
-  3-5; 'answer_from_context' skips question_generation/dispatch_retrieval/
-  review_evidence entirely and lets synthesizer answer straight from
-  whatever question_results/log_cypher_context/log_vector_context/
-  mcp_rdf_context the last turn that actually retrieved something left
-  behind -- these are plain (non-reducer) state fields, so the checkpointer
-  carries them forward unchanged across a turn that does no new retrieval,
-  which is what makes this "cache" possible with no extra state or
-  storage.
+  decision): the initial case turn uses 'full_hypothesis'; follow-up turns
+  use 'direct_question' for one targeted question or
+  'answer_from_context' when existing evidence is enough. Follow-up
+  'full_hypothesis' output is normalized to 'direct_question' at the graph
+  boundary. 'answer_from_context' skips
+  question_generation/dispatch_retrieval/review_evidence entirely and lets
+  synthesizer answer straight from whatever
+  question_results/log_cypher_context/log_vector_context/mcp_rdf_context the
+  last turn that actually retrieved something left behind -- these are plain
+  (non-reducer) state fields, so the checkpointer carries them forward
+  unchanged across a turn that does no new retrieval, which is what makes
+  this "cache" possible with no extra state or storage.
 
 Config v3 (after the russellmitchell-cases-fused pilot; see
 eval/output/russellmitchell-cases-fused/baseline_status.json) changes what
@@ -310,6 +311,7 @@ def guardrails_node(state: AgentState):
     case_context = (state.get('case_context') or "N/A") + (state.get('related_findings_context') or "")
     conversation_context = _render_conversation_context(messages)
     prior_evidence_summary = _render_prior_evidence(state)
+    is_followup = turn_no > 1
     guardrails_logger.info(f"invoked -- question={question!r}")
     result = guardrails_chain.invoke({
         "question": question,
@@ -318,8 +320,14 @@ def guardrails_node(state: AgentState):
         "conversation_context": conversation_context,
         "prior_evidence_summary": prior_evidence_summary,
     })
+    mode = result.investigation_mode
+    if is_followup and mode == "full_hypothesis":
+        # Keep chat turns focused even if the router model over-classifies a
+        # question with multiple possible explanations.
+        mode = "direct_question"
+        guardrails_logger.info("normalized follow-up mode full_hypothesis -> direct_question")
     guardrails_logger.info(
-        f"output: decision={result.decision} investigation_mode={result.investigation_mode} "
+        f"output: decision={result.decision} investigation_mode={mode} "
         f"reasoning={result.reasoning!r}"
     )
 
@@ -327,12 +335,12 @@ def guardrails_node(state: AgentState):
         answer = "Sorry, I can only answer questions related to log analysis and cybersecurity knowledge topic"
         return {
             "is_relevant": False,
-            "investigation_mode": result.investigation_mode,
+            "investigation_mode": mode,
             "answer": answer,
             "messages": [AIMessage(content=answer, id=f"turn-{turn_no}-answer")],
         }
 
-    return {"is_relevant": True, "investigation_mode": result.investigation_mode}
+    return {"is_relevant": True, "investigation_mode": mode}
 
 
 # --- Node Definition: Question Generation ---
@@ -374,8 +382,9 @@ def _guaranteed_mitigation_question(state: AgentState) -> dict | None:
 
 
 def question_generation_node(state: AgentState):
-    """Generates several hypothesis-tagged investigative questions from the
-    alert/question, each pre-tagged with which retrieval source answers it."""
+    """Generates investigation questions from the alert/question, each
+    pre-tagged with which retrieval source answers it. Initial turns use a
+    hypothesis set; focused follow-ups use one question."""
     mode = state.get('investigation_mode') or "full_hypothesis"
     if mode == "answer_from_context":
         # Guardrails decided the evidence already gathered in a prior turn
@@ -403,8 +412,8 @@ def question_generation_node(state: AgentState):
             f"  - hypothesis={q['hypothesis']!r} question={q['question']!r} source={q['source']}"
         )
 
-    mitigation_q = _guaranteed_mitigation_question(state)
-    if mitigation_q and mode != "single_interpretation":
+    mitigation_q = _guaranteed_mitigation_question(state) if mode == "full_hypothesis" else None
+    if mitigation_q:
         questions.append(mitigation_q)
         question_generation_logger.info(f"  - GUARANTEED: question={mitigation_q['question']!r} source=cskg")
 

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -64,6 +65,13 @@ checkpointed_app = workflow.compile(checkpointer=checkpointer)
 
 # Keyed by case_id (== LangGraph thread_id). Rebuilt after a restart from the
 # audit log (_transcripts) and data/checkpoints/ (_case_by_id, lazily).
+# Individual retrieval calls have their own deadlines, but a provider can
+# still leave the whole graph waiting indefinitely during synthesis. Keep the
+# HTTP request bounded at the turn level as well.
+PIPELINE_TIMEOUT_SECONDS = int(os.environ.get("INVESTIGATION_TIMEOUT_SECONDS", "480"))
+
+# The in-memory maps are rebuilt after a restart from the audit log and
+# data/checkpoints/; the checkpoint keeps follow-up turns resumable.
 _transcripts: Dict[str, List["TurnRecord"]] = {}
 _case_by_id: Dict[str, Case] = {}
 _restored: set = set()   # cases reloaded from the audit log after a restart
@@ -90,6 +98,10 @@ class InvestigationSummary(BaseModel):
     resumable: bool
     # A turn is in progress right now (follow GET .../events).
     running: bool = False
+
+
+class InvestigationTimeoutError(TimeoutError):
+    """The complete investigation turn exceeded its wall-clock deadline."""
 
 
 class TurnRecord(BaseModel):
@@ -220,6 +232,21 @@ def _append_log(record: TurnRecord) -> None:
         f.write(record.model_dump_json() + "\n")
 
 
+_RETRYABLE_PROVIDER_STATUS = {408, 409, 429, 500, 502, 503, 504, 520, 522, 524}
+
+
+def _pipeline_error_message(exc: Exception) -> str:
+    """Return a useful, bounded message for the UI while logging the full error."""
+    if isinstance(exc, InvestigationTimeoutError):
+        return "The investigation exceeded its time limit. Please retry in a moment."
+    status = getattr(exc, "status_code", None)
+    if status in _RETRYABLE_PROVIDER_STATUS:
+        return f"The model provider is temporarily unavailable (HTTP {status}). Please retry in a moment."
+    if isinstance(exc, TimeoutError) or type(exc).__name__ == "APITimeoutError":
+        return "The model provider timed out. Please retry in a moment."
+    return str(exc) or f"{type(exc).__name__} without a message"
+
+
 async def _run_turn(case_id: str, question: str, extra_state: dict) -> TurnRecord:
     """Invokes checkpointed_app on the given thread. `grounding_retry_count`
     is always reset to 0 here even though it isn't a reducer field: without
@@ -244,7 +271,7 @@ async def _run_turn(case_id: str, question: str, extra_state: dict) -> TurnRecor
     token = current_case.set(case_id)
     bus.start_turn(case_id, turn_index, question)
     start = time.monotonic()
-    try:
+    async def consume_graph() -> dict:
         async for update in checkpointed_app.astream(state, config=config, stream_mode="updates"):
             for node, node_update in (update or {}).items():
                 bus.publish(case_id, {
@@ -254,10 +281,19 @@ async def _run_turn(case_id: str, question: str, extra_state: dict) -> TurnRecor
                     "elapsed": round(time.monotonic() - start, 2),
                 })
         snapshot = await checkpointed_app.aget_state(config)
-        result = dict(snapshot.values or {})
+        return dict(snapshot.values or {})
+
+    try:
+        result = await asyncio.wait_for(consume_graph(), timeout=PIPELINE_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError as exc:
+        timeout_error = InvestigationTimeoutError(
+            f"Investigation did not finish within {PIPELINE_TIMEOUT_SECONDS}s"
+        )
+        logger.error(f"[investigation] pipeline failed for case {case_id}: {timeout_error}", exc_info=True)
+        result = {"answer": None, "error": _pipeline_error_message(timeout_error)}
     except Exception as e:
         logger.error(f"[investigation] pipeline failed for case {case_id}: {e}", exc_info=True)
-        result = {"answer": None, "error": str(e)}
+        result = {"answer": None, "error": _pipeline_error_message(e)}
     finally:
         current_case.reset(token)
     latency = time.monotonic() - start

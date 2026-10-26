@@ -69,9 +69,9 @@ class AgentState(TypedDict):
 
     # guardrails_agent.py's routing decision for how much investigation
     # this turn needs -- see GuardrailsOutput.investigation_mode.
-    # "full_hypothesis": generate several hypothesis-tagged questions (the
-    #   default -- always used for turn 1 and for src/run.py/eval/, which
-    #   have no prior-turn evidence to reuse).
+    # "full_hypothesis": generate several hypothesis-tagged questions for
+    #   turn 1 and for src/run.py/eval/, which have no prior-turn evidence to
+    #   reuse. Follow-up turns are normalized away from this mode.
     # "direct_question": a narrow follow-up that still needs new
     #   information, but not a full multi-hypothesis investigation.
     # "answer_from_context": the evidence already gathered in a prior turn
