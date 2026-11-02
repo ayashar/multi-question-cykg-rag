@@ -19,3 +19,4 @@ ait_ldsv2
 # investigation runtime state (saved conversations)
 data/checkpoints/
 data/investigations.jsonl
+.DS_Store

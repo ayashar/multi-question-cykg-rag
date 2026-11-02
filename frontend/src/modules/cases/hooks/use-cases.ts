@@ -8,8 +8,10 @@ import {
   getCases,
   INVESTIGATED_CASES_STORAGE_KEY,
   parseInvestigatedCases,
+  recordInvestigatedCase,
   resolveLookbackHours,
 } from "../services/cases-service";
+import { listInvestigations } from "@/api";
 
 const PRESET_KEY = "cskg_active_lookback_preset";
 const HOURS_KEY = "cskg_active_lookback_hours";
@@ -82,6 +84,15 @@ export function useCases(initialPreset: LookbackPreset = "24h", itemsPerPage: nu
           getCases(hours),
           getInvestigations().catch(() => []),
         ]);
+        if (request !== latestRequest.current) return;
+        // Investigations live on the backend too; browser history alone misses
+        // cases investigated in another browser/session or evicted from storage.
+        try {
+          const done = new Set((await listInvestigations()).filter((s) => s.turn_count > 0).map((s) => s.case_id));
+          const known = new Set(parseInvestigatedCases(getHistorySnapshot()).map((r) => r.case_id));
+          data.filter((c) => done.has(c.case_id) && !known.has(c.case_id))
+            .forEach((c) => recordInvestigatedCase(c, hours));
+        } catch { /* Backend history is best-effort. */ }
         if (request !== latestRequest.current) return;
         setFetchedCases(data);
         setServerInvestigations(investigations);
