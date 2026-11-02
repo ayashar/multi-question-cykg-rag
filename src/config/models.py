@@ -28,7 +28,7 @@ def model_identity():
     return {'provider': provider,
             'base_url': {'openrouter': 'https://openrouter.ai/api/v1',
                          'openai': 'https://api.openai.com/v1',
-                         'deepseek': 'https://api.deepseek.com'}[provider],
+                         'deepseek': 'https://api.deepseek.com/beta'}[provider],
             'model': model, 'fast_model': fast, 'reasoning_effort': reasoning_effort,
             'dynamic_model_selection': dynamic,
             'structured_output': 'tool_call_strict' if provider == 'deepseek' else 'json_schema_strict',
