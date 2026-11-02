@@ -1,55 +1,12 @@
 """Provider-compatible structured output, validated locally."""
-import ast
 import json
 import os
 from typing import Any
 
+from json_repair import repair_json
 from langchain_core.exceptions import OutputParserException
 from langchain_core.runnables import RunnableLambda
 from pydantic import ValidationError
-
-
-def _pythonize_json_literals(value: str) -> str:
-    """Make JSON booleans/nulls readable by ``ast.literal_eval``.
-
-    DeepSeek can occasionally return a Python-looking dict as tool arguments
-    (single quotes plus JSON ``true``/``false``). Replace literals only while
-    outside quoted strings so the model's reasoning text is preserved.
-    """
-    replacements = {"true": "True", "false": "False", "null": "None"}
-    output: list[str] = []
-    quote: str | None = None
-    escaped = False
-    index = 0
-    while index < len(value):
-        char = value[index]
-        if quote:
-            output.append(char)
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == quote:
-                quote = None
-            index += 1
-            continue
-        if char in ("'", '"'):
-            quote = char
-            output.append(char)
-            index += 1
-            continue
-        matched = next(
-            (name for name in replacements if value.startswith(name, index)), None
-        )
-        if matched and (index == 0 or not (value[index - 1].isalnum() or value[index - 1] == "_")):
-            end = index + len(matched)
-            if end == len(value) or not (value[end].isalnum() or value[end] == "_"):
-                output.append(replacements[matched])
-                index = end
-                continue
-        output.append(char)
-        index += 1
-    return "".join(output)
 
 
 def _coerce_arguments(value: Any) -> dict[str, Any]:
@@ -62,9 +19,9 @@ def _coerce_arguments(value: Any) -> dict[str, Any]:
         parsed = json.loads(text)
     except json.JSONDecodeError:
         try:
-            parsed = ast.literal_eval(_pythonize_json_literals(text))
-        except (SyntaxError, ValueError) as exc:
-            raise OutputParserException("Structured arguments are neither valid JSON nor a Python dict") from exc
+            parsed = repair_json(text, return_objects=True)
+        except (TypeError, ValueError) as exc:
+            raise OutputParserException("Structured arguments are neither valid JSON nor repairable JSON") from exc
     if not isinstance(parsed, dict):
         raise OutputParserException("Structured arguments must be an object")
     return parsed
