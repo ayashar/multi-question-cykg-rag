@@ -15,8 +15,8 @@ the system needs from review now is not "should we retry" but "what does
 this evidence say about the hypothesis," so the synthesizer can weigh
 confirmed/ruled-out/inconclusive verdicts across all questions at once.
 """
-from typing import Literal
-from pydantic import BaseModel, Field
+from typing import Any, Literal
+from pydantic import BaseModel, Field, model_validator
 from langchain_core.prompts import ChatPromptTemplate
 from src.config.settings import llm
 from src.config.structured import structured_model
@@ -36,6 +36,15 @@ class ReviewOutput(BaseModel):
         "'inconclusive' just because the list is empty."
     )
     reasoning: str = Field(description="One or two sentences justifying both fields.")
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_missing_sufficiency(cls, value: Any) -> Any:
+        # Some DeepSeek responses omit this field despite the strict tool schema.
+        # Treat missing evidence conservatively instead of failing the pipeline.
+        if isinstance(value, dict) and "sufficient" not in value:
+            return {**value, "sufficient": False}
+        return value
 
 
 review_prompt = ChatPromptTemplate.from_messages([
