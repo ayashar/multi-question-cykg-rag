@@ -8,3 +8,17 @@ export function getChatTranscript(caseId: string, includeTrace = false): Promise
     params: includeTrace ? { include_trace: true } : undefined,
   });
 }
+
+export interface InvestigationSummary {
+  case_id: string;
+  turn_count: number;
+  last_timestamp: string;
+  resumable: boolean;
+  running?: boolean;
+}
+
+/** Cases the backend has already investigated (persisted server-side). */
+export function listInvestigations(): Promise<InvestigationSummary[]> {
+  if (isDemoMode()) return Promise.resolve([]);
+  return apiRequest("/investigations", { method: "GET", endpointKey: "listInvestigations" });
+}

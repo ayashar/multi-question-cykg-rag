@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowUpRight, FileText, GitMerge, LayoutGrid, LoaderCircle, MessageSquare, ScrollText } from "lucide-react";
-import { ApiClientError, resolveCaseLookback, sendChatMessageStream, type Case, type InvestigationProgressEvent, type TurnRecord } from "@/api";
+import { ApiClientError, progressEventsFromTrace, resolveCaseLookback, sendChatMessageStream, type Case, type InvestigationProgressEvent, type TurnRecord } from "@/api";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { ApiErrorView, CaseNotFoundError, TurnResult } from "@/components/ui/error-states";
 import { InvestigationLoader, InvestigationLog } from "@/components/ui/investigation-loader";
@@ -72,7 +72,9 @@ export default function CaseInvestigation({
           if (saved?.turn?.case_id === caseId && saved.turn.error === null) {
             setValue(saved.case);
             setTurn(saved.turn);
-            progressEventsRef.current = saved.progress_events ?? [];
+            progressEventsRef.current = saved.progress_events?.length
+              ? saved.progress_events
+              : progressEventsFromTrace(saved.turn);
             setProgressEvents(progressEventsRef.current);
             setIsManualTimeRange(saved.source === "manual-time-range");
             setIsLoading(false);

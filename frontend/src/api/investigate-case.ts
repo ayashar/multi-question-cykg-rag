@@ -127,6 +127,42 @@ async function streamReconstructedInvestigation(
   }
 }
 
+const STEP_LABELS: Record<string, string> = Object.fromEntries(DEMO_AGENTS.map(([agent, , label]) => [agent, label]));
+
+/**
+ * The backend returns an already-investigated case's saved turn instantly,
+ * without re-running the agents, so no live progress events are streamed.
+ * Rebuild the agent log from the trace the backend saved with that turn.
+ */
+export function progressEventsFromTrace(result: TurnRecord): InvestigationProgressEvent[] {
+  const log = result.trace?.log ?? [];
+  const fallbackTs = result.timestamp ?? new Date().toISOString();
+  const firstTs = log.find((line) => typeof line.ts === "number")?.ts;
+  const events: InvestigationProgressEvent[] = log.map((line) => ({
+    type: "log",
+    agent: line.agent,
+    agent_id: line.agent ? `agent.${line.agent}` : undefined,
+    label: line.agent ? STEP_LABELS[line.agent] ?? line.agent : "Investigation agent",
+    message: line.message,
+    level: line.level,
+    timestamp: typeof line.ts === "number" ? new Date(line.ts * 1000).toISOString() : fallbackTs,
+    elapsed_seconds: typeof line.ts === "number" && typeof firstTs === "number" ? line.ts - firstTs : undefined,
+    source: "backend",
+  }));
+  for (const [agent, agentId, label] of DEMO_AGENTS) {
+    const lines = log.filter((line) => line.agent === agent);
+    const lastTs = lines[lines.length - 1]?.ts;
+    events.push({
+      type: "agent", status: "complete", agent, agent_id: agentId, label,
+      messages: lines.slice(-3).map((line) => line.message),
+      timestamp: typeof lastTs === "number" ? new Date(lastTs * 1000).toISOString() : fallbackTs,
+      elapsed_seconds: typeof lastTs === "number" && typeof firstTs === "number" ? lastTs - firstTs : undefined,
+      source: "backend",
+    });
+  }
+  return events;
+}
+
 export async function investigateCaseStream(
   input: string | InvestigateCaseParams,
   onEvent: (event: InvestigationProgressEvent) => void,
@@ -136,13 +172,23 @@ export async function investigateCaseStream(
   const caseId = typeof input === "string" ? input : input.case_id;
   if (isDemoMode()) return streamDemoInvestigation(caseId, onEvent);
   const started = Date.now();
+  let liveEvents = 0;
+  const track = (event: InvestigationProgressEvent) => {
+    if (event.source === "backend") liveEvents++;
+    onEvent(event);
+  };
   try {
     const result = await runWithInvestigationEventStream(
       caseId,
       () => investigateCase(input, explicitLookback),
-      onEvent,
+      track,
       () => streamReconstructedInvestigation(input, onEvent, explicitLookback, caseValue),
     );
+    // A previously investigated case comes back from the backend cache with no
+    // live agent events; replay its saved trace so the log isn't empty.
+    if (liveEvents === 0 && result.trace?.log?.length) {
+      progressEventsFromTrace(result).forEach(onEvent);
+    }
     onEvent({ type: "result", result, timestamp: new Date().toISOString() });
     return result;
   } catch (reason) {

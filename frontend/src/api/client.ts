@@ -190,6 +190,7 @@ export type ApiEndpointKey =
   | "investigateTimeRange"
   | "sendChatMessage"
   | "getChatTranscript"
+  | "listInvestigations"
   | "getTurnTrace"
   | "getIngestionConfig"
   | "updateIngestionConfig"
