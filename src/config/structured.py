@@ -53,7 +53,9 @@ def structured_model(model, schema):
     chain = model.with_structured_output(
         schema,
         method=method,
-        strict=True,
+        # DeepSeek rejects strict tool schemas when optional Pydantic fields
+        # are omitted from `required`; validate and fill defaults locally.
+        strict=provider != 'deepseek',
         include_raw=provider == 'deepseek',
     )
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowUp, ChevronDown, FileText, LoaderCircle } from "lucide-react";
-import type { Case, InvestigationProgressEvent, TurnRecord } from "@/api";
+import { getChatTranscript, type Case, type InvestigationProgressEvent, type TurnRecord } from "@/api";
 import { ButtonLink } from "@/components/ui/button";
 import { TurnResult } from "@/components/ui/error-states";
 import MarkdownContent from "@/components/ui/markdown-content";
@@ -178,6 +178,22 @@ export default function InvestigationChatroom({
   useEffect(() => () => {
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
   }, []);
+
+  useEffect(() => {
+    if (!investigationReady) return;
+    let cancelled = false;
+    void getChatTranscript(caseId).then((transcript) => {
+      if (cancelled || !transcript.length) return;
+      setTurns((current) => {
+        const merged = new Map(current.map((turn) => [turn.turn_index, turn]));
+        transcript.forEach((turn) => merged.set(turn.turn_index, turn));
+        return [...merged.values()];
+      });
+    }).catch(() => {
+      // Keep the initial turn visible when transcript loading is unavailable.
+    });
+    return () => { cancelled = true; };
+  }, [caseId, investigationReady]);
 
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
