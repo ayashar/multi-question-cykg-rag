@@ -39,7 +39,7 @@ export function getInvestigatedCase(caseId: string): InvestigatedCaseRecord | un
 
 export function excludeInvestigatedCases(
   cases: Case[],
-  investigatedCases: InvestigatedCaseRecord[] = getInvestigatedCases(),
+  investigatedCases: ReadonlyArray<Pick<InvestigatedCaseRecord, "case_id">> = getInvestigatedCases(),
 ): Case[] {
   const investigatedIds = new Set(investigatedCases.map((record) => record.case_id));
   return cases.filter((item) => !investigatedIds.has(item.case_id));

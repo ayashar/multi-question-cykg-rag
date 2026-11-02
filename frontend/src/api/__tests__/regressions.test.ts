@@ -175,13 +175,12 @@ test("case queues exclude cases that already have investigation history", () => 
   const fresh = { ...exampleCase, case_id: "fresh" };
   const investigated = { ...exampleCase, case_id: "investigated" };
 
-  const result = excludeInvestigatedCases([fresh, investigated], [{
-    case_id: investigated.case_id,
-    investigated_at: "2026-09-29T00:00:00Z",
-    case: investigated,
-    lookback_hours: 24,
-    source: "case-list",
-  }]);
+  const result = excludeInvestigatedCases([fresh, investigated], [{ case_id: investigated.case_id }]);
 
   assert.deepEqual(result.map((item) => item.case_id), [fresh.case_id]);
+
+  const serverHistoryResult = excludeInvestigatedCases([fresh, investigated], [
+    { case_id: investigated.case_id },
+  ]);
+  assert.deepEqual(serverHistoryResult.map((item) => item.case_id), [fresh.case_id]);
 });

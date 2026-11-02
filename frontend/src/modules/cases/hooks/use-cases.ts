@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 import { type Case, type LookbackPreset } from "../types";
+import { getInvestigations, type InvestigationSummary } from "@/api";
 import {
   excludeInvestigatedCases,
   getCases,
@@ -52,6 +53,7 @@ export function useCases(initialPreset: LookbackPreset = "24h", itemsPerPage: nu
   const storedHistory = useSyncExternalStore(subscribeHistory, getHistorySnapshot, () => "[]");
   const preset = storedPreset;
   const [fetchedCases, setFetchedCases] = useState<Case[]>([]);
+  const [serverInvestigations, setServerInvestigations] = useState<InvestigationSummary[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<Error | null>(null);
@@ -76,9 +78,13 @@ export function useCases(initialPreset: LookbackPreset = "24h", itemsPerPage: nu
       try {
         const hours = await resolveLookbackHours(selectedPreset);
         try { sessionStorage.setItem(HOURS_KEY, String(hours)); } catch { /* Persistence is optional. */ }
-        const data = await getCases(hours);
+        const [data, investigations] = await Promise.all([
+          getCases(hours),
+          getInvestigations().catch(() => []),
+        ]);
         if (request !== latestRequest.current) return;
         setFetchedCases(data);
+        setServerInvestigations(investigations);
         setPage(1);
       } catch (err: unknown) {
         if (request !== latestRequest.current) return;
@@ -100,8 +106,12 @@ export function useCases(initialPreset: LookbackPreset = "24h", itemsPerPage: nu
   }, [fetchCaseList, preset]);
 
   const cases = useMemo(() => {
-    return excludeInvestigatedCases(fetchedCases, parseInvestigatedCases(storedHistory));
-  }, [fetchedCases, storedHistory]);
+    const localHistory = parseInvestigatedCases(storedHistory);
+    const completedServerHistory = serverInvestigations.filter(
+      (summary) => summary.turn_count > 0 && summary.last_answer_preview != null,
+    );
+    return excludeInvestigatedCases(fetchedCases, [...localHistory, ...completedServerHistory]);
+  }, [fetchedCases, serverInvestigations, storedHistory]);
 
   const totalPages = useMemo(() => {
     return Math.max(1, Math.ceil(cases.length / itemsPerPage));

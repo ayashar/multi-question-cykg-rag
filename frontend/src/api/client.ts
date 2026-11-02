@@ -34,6 +34,20 @@ export interface TurnRecord {
   trace?: InvestigationTrace | null;
 }
 
+export interface InvestigationSummary {
+  case_id: string;
+  turn_count: number;
+  first_question: string;
+  last_question: string;
+  last_answer_preview?: string | null;
+  last_timestamp: string;
+  recommended_priority?: string | null;
+  hosts: string[];
+  alert_count?: number | null;
+  resumable: boolean;
+  running: boolean;
+}
+
 export interface InvestigationTrace {
   mode?: string | null;
   hypotheses?: Array<Record<string, unknown>>;
@@ -170,6 +184,7 @@ export interface ApiConfig {
 
 export type ApiEndpointKey =
   | "getCases"
+  | "getInvestigations"
   | "investigateCase"
   | "getAttackGraph"
   | "investigateTimeRange"

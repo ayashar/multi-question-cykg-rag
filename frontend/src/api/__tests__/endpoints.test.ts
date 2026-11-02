@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   getCases,
+  getInvestigations,
   investigateCase,
   getAttackGraph,
   investigateTimeRange,
@@ -120,6 +121,19 @@ describe("API Client Suite", () => {
 
       assert.ok(lastCall);
       assert.equal(new URL(lastCall.url).origin, "http://rotated-api:9000");
+    });
+  });
+
+  describe("Investigation history", () => {
+    it("loads server-side investigation summaries", async () => {
+      setupMockFetch([{ case_id: "case-saved", turn_count: 1, last_answer_preview: "saved" }]);
+
+      const summaries = await getInvestigations();
+
+      assert.equal(summaries[0]?.case_id, "case-saved");
+      assert.ok(lastCall);
+      assert.equal(new URL(lastCall.url).pathname, "/investigations");
+      assert.equal(lastCall.options?.method, "GET");
     });
   });
 

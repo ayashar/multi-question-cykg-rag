@@ -1,6 +1,7 @@
 export * from "./client";
 export * from "./investigation-events";
 export * from "./get-cases";
+export * from "./get-investigations";
 export * from "./investigate-case";
 export * from "./get-attack-graph";
 export * from "./investigate-time-range";
