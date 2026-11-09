@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowUp, ChevronDown, FileText, LoaderCircle } from "lucide-react";
-import { getChatTranscript, type Case, type InvestigationProgressEvent, type TurnRecord } from "@/api";
+import { ArrowUp, ChevronDown, FileText, LoaderCircle, Sparkles } from "lucide-react";
+import { getChatTranscript, progressEventsFromTrace, type Case, type InvestigationProgressEvent, type TurnRecord } from "@/api";
 import { ButtonLink } from "@/components/ui/button";
 import { TurnResult } from "@/components/ui/error-states";
+import InvestigationActivityLog from "@/components/ui/investigation-activity-log";
 import MarkdownContent from "@/components/ui/markdown-content";
 import {
   createChatroomCase,
@@ -57,50 +58,6 @@ function AnswerBubble({ turn }: { turn: TurnRecord }) {
   );
 }
 
-function FullActivityLog({
-  events,
-  defaultOpen = false,
-}: {
-  events: InvestigationProgressEvent[];
-  defaultOpen?: boolean;
-}) {
-  const fullLog = events.filter((event) => (
-    (event.type === "agent" && event.status === "complete" && (event.label || event.messages?.length)) ||
-    (event.type === "log" && event.message) ||
-    event.type === "error"
-  ));
-
-  if (!fullLog.length) return null;
-
-  return (
-    <details open={defaultOpen} className="mt-3 rounded-[4px] border border-primary-200 bg-background/60">
-      <summary className="cursor-pointer px-2.5 py-2 font-b3 font-semibold text-primary-800">
-        Full activity log ({fullLog.length} events)
-      </summary>
-      <ol className="max-h-56 space-y-2 overflow-y-auto border-t border-primary-200 px-2.5 py-2" aria-label="Full response activity log">
-        {fullLog.map((event, index) => (
-          <li key={`${event.type}-${event.agent ?? "system"}-${event.timestamp}-${index}`} className="border-l-2 border-primary-300 pl-2">
-            {event.type === "agent" ? (
-              <>
-                <p className="font-b3 font-semibold text-primary-900">{event.label}</p>
-                {event.messages?.map((message, messageIndex) => (
-                  <p key={`${message}-${messageIndex}`} className="font-mono text-[11px] leading-relaxed text-primary-800 wrap-anywhere">{message}</p>
-                ))}
-              </>
-            ) : event.type === "error" ? (
-              <p className="font-mono text-[11px] leading-relaxed text-red-500 wrap-anywhere">{event.message}</p>
-            ) : (
-              <p className="font-mono text-[11px] leading-relaxed text-primary-800 wrap-anywhere">
-                {event.agent ? `[${event.agent}] ` : ""}{event.message}
-              </p>
-            )}
-          </li>
-        ))}
-      </ol>
-    </details>
-  );
-}
-
 function ChatActivity({ events }: { events: InvestigationProgressEvent[] }) {
   const latestAgent = [...events]
     .reverse()
@@ -132,7 +89,7 @@ function ChatActivity({ events }: { events: InvestigationProgressEvent[] }) {
         <p className="mt-2 font-b3 text-primary-800">Waiting for the investigation service to report progress.</p>
       )}
 
-      <FullActivityLog events={events} defaultOpen />
+      <InvestigationActivityLog events={events} defaultOpen />
     </section>
   );
 }
@@ -149,17 +106,59 @@ function InvestigationUnavailable() {
   );
 }
 
+function getSummaryText(turn: TurnRecord): string | null {
+  const source = turn.critical_analysis || turn.answer;
+  if (!source) return null;
+
+  const plainText = source
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/[*_`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!plainText) return null;
+  return plainText.length > 360 ? `${plainText.slice(0, 357).trimEnd()}…` : plainText;
+}
+
+function ChatAiSummary({ turn }: { turn: TurnRecord }) {
+  const summary = getSummaryText(turn);
+  if (!summary || turn.error) return null;
+
+  return (
+    <section aria-labelledby="chat-ai-summary" className="rounded-[8px] border border-primary-200 bg-background px-4 py-3">
+      <div className="flex items-center gap-2">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary-100 text-primary-800">
+          <Sparkles aria-hidden="true" className="size-4" />
+        </span>
+        <h2 id="chat-ai-summary" className="font-b1 font-semibold">AI summary</h2>
+        {turn.confidence && <ConfidenceBadge confidence={turn.confidence} />}
+      </div>
+      <p className="mt-2 font-b2 leading-relaxed text-neutral-900">{summary}</p>
+      <p className="mt-2 font-b3 text-neutral-700">Based on the initial investigation. Open the report below for the full findings and evidence.</p>
+    </section>
+  );
+}
+
+function mergeTranscriptTurn(current: TurnRecord, incoming: TurnRecord): TurnRecord {
+  // A just-completed request can reach the UI before the persisted transcript.
+  // Do not replace that successful result with an older failed/incomplete record.
+  if (current.answer && !incoming.answer && incoming.error) return current;
+  if (current.error && !incoming.error) return incoming;
+  return incoming;
+}
+
 export default function InvestigationChatroom({
   caseId = "case-1234-5678",
   hasInvestigation = true,
   value: providedValue,
   initialTurns,
+  initialEvents,
   onSendQuestion,
 }: {
   caseId?: string;
   hasInvestigation?: boolean;
   value?: Case;
   initialTurns?: TurnRecord[];
+  initialEvents?: InvestigationProgressEvent[];
   onSendQuestion?: (question: string, onProgress: (event: InvestigationProgressEvent) => void) => Promise<TurnRecord>;
 }) {
   const investigationReady = hasInvestigation;
@@ -182,11 +181,20 @@ export default function InvestigationChatroom({
   useEffect(() => {
     if (!investigationReady) return;
     let cancelled = false;
-    void getChatTranscript(caseId).then((transcript) => {
+    void getChatTranscript(caseId, true).then((transcript) => {
       if (cancelled || !transcript.length) return;
+      const restoredLogs = Object.fromEntries(
+        transcript
+          .filter((turn) => turn.trace?.log?.length)
+          .map((turn) => [turn.turn_index, progressEventsFromTrace(turn)]),
+      );
+      setChatLogs((current) => ({ ...restoredLogs, ...current }));
       setTurns((current) => {
         const merged = new Map(current.map((turn) => [turn.turn_index, turn]));
-        transcript.forEach((turn) => merged.set(turn.turn_index, turn));
+        transcript.forEach((turn) => {
+          const existing = merged.get(turn.turn_index);
+          merged.set(turn.turn_index, existing ? mergeTranscriptTurn(existing, turn) : turn);
+        });
         return [...merged.values()];
       });
     }).catch(() => {
@@ -204,6 +212,9 @@ export default function InvestigationChatroom({
     [turns],
   );
   const firstTurn = orderedTurns.find((turn) => turn.turn_index === 1);
+  const summaryTurn = initialTurns?.find((turn) => !turn.error && (turn.answer || turn.critical_analysis))
+    ?? orderedTurns.find((turn) => !turn.error && (turn.answer || turn.critical_analysis));
+  const firstTurnEvents = firstTurn?.trace ? progressEventsFromTrace(firstTurn) : initialEvents ?? [];
   const followUps = orderedTurns.filter((turn) => turn.turn_index > 1);
 
   const sendQuestion = async (questionInput = draft) => {
@@ -252,6 +263,7 @@ export default function InvestigationChatroom({
         ) : (
           <>
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+              {summaryTurn && <ChatAiSummary turn={summaryTurn} />}
               {firstTurn && (
                 <details className="group rounded-[8px] bg-background">
                   <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3 marker:content-none">
@@ -266,6 +278,7 @@ export default function InvestigationChatroom({
                   </summary>
                   <div className="border-t border-neutral-300 p-4">
                     <InvestigationReport value={value} turn={firstTurn} />
+                    <InvestigationActivityLog events={firstTurnEvents} trace={firstTurn.trace} />
                   </div>
                 </details>
               )}
@@ -275,7 +288,7 @@ export default function InvestigationChatroom({
                   <TurnResult turn={turn} onRetry={() => void sendQuestion(turn.question)}>
                     <AnswerBubble turn={turn} />
                   </TurnResult>
-                  <FullActivityLog events={chatLogs[turn.turn_index] ?? []} />
+                  <InvestigationActivityLog events={chatLogs[turn.turn_index] ?? []} trace={turn.trace} />
                 </div>
               ))}
               {isSending && (
@@ -285,7 +298,7 @@ export default function InvestigationChatroom({
                 </div>
               )}
               {sendError && <p role="alert" className="font-b2 text-red-500">{sendError}</p>}
-              {!isSending && sendError && <FullActivityLog events={chatEvents} defaultOpen />}
+              {!isSending && sendError && <InvestigationActivityLog events={chatEvents} defaultOpen />}
               <div ref={transcriptEndRef} aria-hidden="true" />
             </div>
 

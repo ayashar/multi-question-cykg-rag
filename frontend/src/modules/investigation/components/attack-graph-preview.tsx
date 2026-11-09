@@ -61,12 +61,16 @@ function resolveRootNodeId(graph: CaseAttackGraph): string | null {
 export function buildGraphLayout(graph: CaseAttackGraph): GraphLayout {
   const nodeIds = new Set(graph.nodes.map((node) => node.id));
   const rootNodeId = resolveRootNodeId(graph);
-  const adjacency = new Map<string, Set<string>>();
-  for (const id of nodeIds) adjacency.set(id, new Set());
+  const outgoing = new Map<string, Set<string>>();
+  const incoming = new Map<string, Set<string>>();
+  for (const id of nodeIds) {
+    outgoing.set(id, new Set());
+    incoming.set(id, new Set());
+  }
   for (const edge of graph.edges) {
     if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) continue;
-    adjacency.get(edge.source)?.add(edge.target);
-    adjacency.get(edge.target)?.add(edge.source);
+    outgoing.get(edge.source)?.add(edge.target);
+    incoming.get(edge.target)?.add(edge.source);
   }
 
   const levels = new Map<string, number>();
@@ -75,14 +79,24 @@ export function buildGraphLayout(graph: CaseAttackGraph): GraphLayout {
     levels.set(rootNodeId, 0);
     for (let index = 0; index < queue.length; index += 1) {
       const current = queue[index];
-      const nextLevel = (levels.get(current) ?? 0) + 1;
-      for (const neighbor of adjacency.get(current) ?? []) {
-        if (levels.has(neighbor)) continue;
-        levels.set(neighbor, nextLevel);
-        queue.push(neighbor);
+      const currentLevel = levels.get(current) ?? 0;
+      for (const target of outgoing.get(current) ?? []) {
+        if (levels.has(target)) continue;
+        levels.set(target, currentLevel + 1);
+        queue.push(target);
+      }
+      for (const source of incoming.get(current) ?? []) {
+        if (levels.has(source)) continue;
+        levels.set(source, currentLevel - 1);
+        queue.push(source);
       }
     }
   }
+
+  // Keep incoming relationships on the source side and outgoing relationships
+  // on the target side so opposite-looking arrows cannot read as bidirectional.
+  const minimumLevel = Math.min(0, ...levels.values());
+  for (const [nodeId, level] of levels) levels.set(nodeId, level - minimumLevel);
 
   let lastLevel = Math.max(0, ...levels.values());
   for (const node of graph.nodes) {
@@ -144,6 +158,11 @@ function GraphPlane({ graph, layout }: { graph: CaseAttackGraph; layout: GraphLa
   return (
     <div className="absolute left-0 top-0 origin-top-left will-change-transform" style={{ width: layout.width, height: layout.height }}>
       <svg aria-hidden="true" className="absolute inset-0 overflow-visible" width={layout.width} height={layout.height}>
+        <defs>
+          <marker id="attack-graph-arrow" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto" markerUnits="strokeWidth">
+            <path d="M 0 0 L 8 4 L 0 8 Z" fill="#111111" />
+          </marker>
+        </defs>
         {graph.edges.map((edge, index) => {
           const source = layout.positions.get(edge.source);
           const target = layout.positions.get(edge.target);
@@ -160,7 +179,7 @@ function GraphPlane({ graph, layout }: { graph: CaseAttackGraph; layout: GraphLa
           const labelWidth = Math.max(78, edge.relation.length * 8 + 24);
           return (
             <g key={`${edge.source}-${edge.relation}-${edge.target}-${index}`}>
-              <path d={path} fill="none" stroke="#111111" strokeWidth="3" />
+              <path d={path} fill="none" stroke="#111111" strokeWidth="3" markerEnd="url(#attack-graph-arrow)" />
               <rect x={labelX - labelWidth / 2} y={labelY - 14} width={labelWidth} height="28" rx="10" fill="#fdfdfd" stroke="#111111" strokeWidth="2" />
               <text x={labelX} y={labelY + 4} textAnchor="middle" fill="#333333" fontSize="11" fontWeight="600" letterSpacing="1.1">{edge.relation.replaceAll("_", " ")}</text>
             </g>
@@ -188,8 +207,11 @@ function GraphLegend() {
           </li>
         ))}
         <li className="flex items-center gap-2">
-          <span aria-hidden="true" className="h-0.5 w-5 bg-neutral-900" />
-          <span>Relationship</span>
+          <svg aria-hidden="true" className="h-3 w-7" viewBox="0 0 28 12" focusable="false">
+            <path d="M 1 6 H 22" fill="none" stroke="#111111" strokeWidth="2" />
+            <path d="M 21 2 L 27 6 L 21 10 Z" fill="#111111" />
+          </svg>
+          <span>Relationship (source → target)</span>
         </li>
         <li className="flex items-center gap-2">
           <span aria-hidden="true" className="size-4 rounded border-2 border-red-200 ring-2 ring-red-200 ring-offset-1" />

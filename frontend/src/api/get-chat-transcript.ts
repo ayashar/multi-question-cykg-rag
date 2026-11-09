@@ -1,4 +1,4 @@
-import { apiRequest, type TurnRecord } from "./client";
+import { apiRequest, type InvestigationSummary, type TurnRecord } from "./client";
 import { demoDelay, getDemoTranscript, isDemoMode } from "@/demo/demo-data";
 
 export function getChatTranscript(caseId: string, includeTrace = false): Promise<TurnRecord[]> {
@@ -7,14 +7,6 @@ export function getChatTranscript(caseId: string, includeTrace = false): Promise
     method: "GET", endpointKey: "getChatTranscript",
     params: includeTrace ? { include_trace: true } : undefined,
   });
-}
-
-export interface InvestigationSummary {
-  case_id: string;
-  turn_count: number;
-  last_timestamp: string;
-  resumable: boolean;
-  running?: boolean;
 }
 
 /** Cases the backend has already investigated (persisted server-side). */

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { ArrowUpRight, ChevronRight, MessageSquare, Search } from "lucide-react";
+import { Activity, ArrowUpRight, ChevronRight, MessageSquare, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { InvestigationLoader } from "@/components/ui/investigation-loader";
 import { useCases } from "@/modules/cases/hooks/use-cases";
@@ -46,6 +46,29 @@ function displayHost(value: Case): { primary: string; secondary: string } {
   const primary = value.hosts[0] ?? value.dst_users[0] ?? "Unknown host";
   const secondary = value.hosts[1] ?? value.src_ips[0] ?? "No secondary entity";
   return { primary, secondary };
+}
+
+function urgencyLabel(score: number): string {
+  if (score >= 70) return "High";
+  if (score >= 40) return "Moderate";
+  return "Low";
+}
+
+function cleanChatPreview(value: string): string {
+  const cleaned = value
+    .replace(/\[Validation\][\s\S]*$/i, "")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/[*_`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const assessment = cleaned.match(/Assessment:\s*(.*?)(?=Recommended action:|$)/i)?.[1]?.trim();
+  const recommendation = cleaned.match(/Recommended action:\s*(.*)$/i)?.[1]?.trim();
+  const chatSummary = [
+    assessment && `Assessment: ${assessment}`,
+    recommendation && `Action: ${recommendation}`,
+  ].filter(Boolean).join(" ");
+  const preview = chatSummary || cleaned;
+  return preview.length > 220 ? `${preview.slice(0, 217).trimEnd()}…` : preview;
 }
 
 function DashboardLink({ href, children }: { href: string; children: React.ReactNode }) {
@@ -167,6 +190,111 @@ function CaseQueue({ cases, isLoading }: { cases: Case[]; isLoading: boolean }) 
   );
 }
 
+function RiskOverview({
+  activeCases,
+  history,
+  isLoading,
+  hasError,
+}: {
+  activeCases: Case[];
+  history: InvestigatedCaseRecord[];
+  isLoading: boolean;
+  hasError: boolean;
+}) {
+  const casesById = new Map<string, Case>();
+  activeCases.forEach((value) => casesById.set(value.case_id, value));
+  history.forEach((record) => casesById.set(record.case_id, record.case));
+  const observedCases = [...casesById.values()];
+  const highestRisk = observedCases.reduce<Case | null>((highest, value) => (
+    !highest || value.urgency_score > highest.urgency_score ? value : highest
+  ), null);
+  const highestRiskRecord = highestRisk ? history.find((record) => record.case_id === highestRisk.case_id) : undefined;
+  const attentionCount = observedCases.filter((value) => value.urgency_score >= 40).length;
+  const posture = highestRisk ? urgencyLabel(highestRisk.urgency_score) : "No data";
+  const highestEntity = highestRisk ? displayHost(highestRisk).primary : "No active case data";
+  const urgencyBands = [
+    { label: "High", count: observedCases.filter((value) => value.urgency_score >= 70).length, color: "bg-red-500" },
+    { label: "Moderate", count: observedCases.filter((value) => value.urgency_score >= 40 && value.urgency_score < 70).length, color: "bg-amber-500" },
+    { label: "Low", count: observedCases.filter((value) => value.urgency_score < 40).length, color: "bg-green-600" },
+  ];
+  const highestBandCount = Math.max(...urgencyBands.map((band) => band.count), 1);
+
+  return (
+    <section className="mb-5 rounded-[10px] border border-primary-300 bg-primary-100 p-5" aria-labelledby="risk-overview-title">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-primary-300 pb-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <Activity aria-hidden="true" className="size-5 text-primary-800" />
+            <h2 id="risk-overview-title" className="text-xl font-bold text-black-600">Risk overview</h2>
+          </div>
+          <p className="mt-1 text-sm text-primary-900">Current case posture and priority items.</p>
+        </div>
+        <span className="inline-flex items-center gap-2 rounded-full border border-primary-300 bg-background px-3 py-1 text-xs font-semibold text-primary-900">
+          <span className={`size-2 rounded-full ${hasError ? "bg-red-500" : isLoading ? "bg-amber-500" : "bg-green-600"}`} />
+          {hasError ? "Data feed degraded" : isLoading ? "Syncing case data" : "Case data live"}
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <article className="rounded-[4px] border border-primary-200 bg-background p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary-800">Current posture</p>
+          <div className="mt-2 flex items-center gap-2">
+            <span className={`size-2.5 rounded-full ${highestRisk ? getUrgencyStripeColor(highestRisk.urgency_score) : "bg-neutral-400"}`} />
+            <p className="text-lg font-bold text-black-600">{posture}</p>
+          </div>
+          <p className="mt-1 text-xs text-primary-800">Highest observed score: {highestRisk ? highestRisk.urgency_score.toFixed(1) : "—"}</p>
+        </article>
+        <article className="rounded-[4px] border border-primary-200 bg-background p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary-800">Open cases</p>
+          <p className="mt-2 text-lg font-bold text-black-600">{activeCases.length}</p>
+          <p className="mt-1 text-xs text-primary-800">Awaiting investigation</p>
+        </article>
+        <article className="rounded-[4px] border border-primary-200 bg-background p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary-800">Needs attention</p>
+          <p className="mt-2 text-lg font-bold text-black-600">{attentionCount}</p>
+          <p className="mt-1 text-xs text-primary-800">Moderate or high urgency</p>
+        </article>
+        <article className="rounded-[4px] border border-primary-200 bg-background p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary-800">Reviewed here</p>
+          <p className="mt-2 text-lg font-bold text-black-600">{history.length}</p>
+          <p className="mt-1 text-xs text-primary-800">Saved investigations</p>
+        </article>
+      </div>
+
+      <div className="mt-4 rounded-[4px] border border-primary-200 bg-background p-3" aria-label="Urgency distribution">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-primary-800">Urgency distribution</p>
+            <p className="mt-1 text-xs text-primary-800">Visible active and saved cases</p>
+          </div>
+          <span className="text-xs font-semibold text-primary-900">{observedCases.length} total</span>
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          {urgencyBands.map((band) => (
+            <div key={band.label} className="grid grid-cols-[68px_minmax(0,1fr)_24px] items-center gap-2 text-xs">
+              <span className="font-semibold text-primary-1000">{band.label}</span>
+              <div className="h-2 overflow-hidden rounded-full bg-primary-100" role="progressbar" aria-label={`${band.label} urgency cases`} aria-valuemin={0} aria-valuemax={highestBandCount} aria-valuenow={band.count}>
+                <div className={`h-full rounded-full ${band.color}`} style={{ width: `${(band.count / highestBandCount) * 100}%` }} />
+              </div>
+              <span className="text-right font-semibold text-primary-900">{band.count}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[4px] border-l-4 border-primary-800 bg-background px-3 py-3">
+        <p className="text-sm text-primary-1000">
+          <span className="font-semibold">Top item to review:</span>{" "}
+          {highestRisk ? <><span className="font-mono font-semibold">{highestRisk.case_id}</span> on <span className="font-semibold">{highestEntity}</span> has the highest observed urgency.</> : "No case data is available yet."}
+        </p>
+        <Link href={highestRiskRecord ? getPastInvestigationHref(highestRiskRecord.case_id, highestRiskRecord.lookback_hours) : highestRisk ? getInvestigationHref(highestRisk.case_id) : "/cases"} className="inline-flex items-center gap-1 text-sm font-semibold text-primary-800 underline-offset-2 hover:underline">
+          Open priority queue <ChevronRight className="size-4" aria-hidden="true" />
+        </Link>
+      </div>
+    </section>
+  );
+}
+
 export default function DashboardOverview() {
   const router = useRouter();
   const { cases, isLoading, error } = useCases("24h", 5);
@@ -218,8 +346,10 @@ export default function DashboardOverview() {
         <h1 className="text-3xl font-bold tracking-tight text-black-600 sm:text-[36px] sm:leading-tight">
           Welcome back, User!
         </h1>
-        <p className="mt-1 text-base text-neutral-1000">Monitor your case</p>
+        <p className="mt-1 text-base text-neutral-1000">Security operations overview</p>
       </section>
+
+      <RiskOverview activeCases={displayCases} history={history} isLoading={isLoading} hasError={Boolean(error)} />
 
       <div className="grid items-stretch gap-3 xl:grid-cols-[minmax(0,.98fr)_minmax(0,1.02fr)] xl:grid-rows-[350px_minmax(220px,auto)]">
         <section className="rounded-[10px] bg-primary-100 p-5 xl:col-start-1 xl:row-start-1" aria-labelledby="past-investigation-title">
@@ -244,20 +374,24 @@ export default function DashboardOverview() {
                   <article
                     key={record.case_id}
                     role="listitem"
-                    className="rounded-[3px] border-l-4 border-primary-800 bg-green-400 px-3 py-3 text-white shadow-sm"
+                    className="rounded-[3px] border border-primary-200 border-l-4 border-l-primary-800 bg-background px-3 py-3 text-primary-1000 shadow-xs"
                   >
-                    <div className="mb-2 flex items-center justify-between gap-3 text-[11px] text-green-100">
-                      <span className="truncate font-mono">{record.case_id}</span>
+                    <div className="mb-2 flex items-center justify-between gap-3 text-[11px] text-primary-800">
+                      <span className="truncate font-mono font-semibold">{record.case_id}</span>
                       <Link
                         href={chatHref}
                         onClick={() => rememberInvestigationCase(record.case)}
                         aria-label={`Continue chat for ${record.case_id}`}
-                        className="inline-flex shrink-0 items-center gap-1 rounded-sm font-medium underline-offset-2 transition hover:text-white hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                        className="inline-flex shrink-0 items-center gap-1 rounded-sm font-medium underline-offset-2 transition hover:text-primary-1000 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-800"
                       >
                         continue <ChevronRight className="size-3.5" aria-hidden="true" />
                       </Link>
                     </div>
-                    <p className="line-clamp-3 text-sm leading-relaxed sm:text-base">{record.turn?.answer}</p>
+                    <p className="line-clamp-3 text-sm leading-relaxed sm:text-base">{cleanChatPreview(record.turn?.answer ?? "No summary was returned.")}</p>
+                    <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-semibold text-primary-800">
+                      {record.turn?.recommended_priority && <span className="rounded-full bg-primary-100 px-2 py-0.5 capitalize">{record.turn.recommended_priority}</span>}
+                      {record.turn?.confidence && <span className="rounded-full bg-primary-100 px-2 py-0.5 capitalize">{record.turn.confidence} confidence</span>}
+                    </div>
                   </article>
                 );
               })}

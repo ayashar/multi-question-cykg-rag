@@ -2,8 +2,9 @@
 
 import * as React from "react";
 import { Bot, Check, Circle, LoaderCircle } from "lucide-react";
-import type { InvestigationProgressEvent } from "@/api";
+import type { InvestigationProgressEvent, TurnRecord } from "@/api";
 import { cn } from "@/lib/utils";
+import InvestigationActivityLog from "./investigation-activity-log";
 
 export const INVESTIGATION_AGENTS = [
   { key: "guardrails", id: "agent.guardrails", label: "Guardrails Agent" },
@@ -40,9 +41,10 @@ export interface InvestigationLoaderProps extends React.HTMLAttributes<HTMLDivEl
 
 export interface InvestigationLogProps extends React.HTMLAttributes<HTMLElement> {
   events: InvestigationProgressEvent[];
+  trace?: TurnRecord["trace"];
 }
 
-export function InvestigationLog({ events, className, ...props }: InvestigationLogProps) {
+export function InvestigationLog({ events, trace, className, ...props }: InvestigationLogProps) {
   const activityEvents = events.filter((event) => event.type === "agent" && event.status === "complete" && event.messages?.length);
   const backendLogEvents = events.filter((event) => event.type === "log" && event.message);
   const completedAgents = new Set(activityEvents.map((event) => event.agent).filter(Boolean));
@@ -53,35 +55,8 @@ export function InvestigationLog({ events, className, ...props }: InvestigationL
         <h2 id="investigation-log-title" className="font-h6">Investigation log</h2>
         <span className="ml-auto font-b3 text-primary-700">{completedAgents.size} agents completed</span>
       </div>
-      {activityEvents.length || backendLogEvents.length ? (
-        <ol className="space-y-4" aria-label="Completed investigation agent log">
-          {activityEvents.map((event, eventIndex) => (
-            <li key={`${event.agent}-${eventIndex}`} className="grid gap-2 border-t border-primary-300 pt-4 first:border-t-0 first:pt-0 sm:grid-cols-[180px_minmax(0,1fr)]">
-              <div>
-                <p className="font-b3 font-semibold">{event.label}</p>
-                <p className="font-mono text-[11px] text-primary-700">{event.agent_id}</p>
-                <p className="mt-1 font-mono text-[11px] text-primary-700">{formatElapsed(event.elapsed_seconds)}</p>
-              </div>
-              <div className="space-y-1.5 border-l-2 border-primary-300 pl-3">
-                {event.messages?.map((message) => (
-                  <p key={message} className="font-mono text-xs leading-relaxed wrap-anywhere">{message}</p>
-                ))}
-              </div>
-            </li>
-          ))}
-          {backendLogEvents.length > 0 && (
-            <li className="border-t border-primary-300 pt-4">
-              <p className="mb-2 font-b3 font-semibold">Backend agent output</p>
-              <div className="space-y-1.5 border-l-2 border-primary-300 pl-3">
-                {backendLogEvents.map((event, eventIndex) => (
-                  <p key={`${event.agent}-${event.timestamp}-${eventIndex}`} className="font-mono text-xs leading-relaxed wrap-anywhere">
-                    {event.agent ? `[${event.agent}] ` : ""}{event.message}
-                  </p>
-                ))}
-              </div>
-            </li>
-          )}
-        </ol>
+      {activityEvents.length || backendLogEvents.length || trace?.retrievals?.length ? (
+        <InvestigationActivityLog events={events} trace={trace} defaultOpen />
       ) : (
         <p className="font-b2 text-primary-800">No agent activity was recorded for this investigation.</p>
       )}

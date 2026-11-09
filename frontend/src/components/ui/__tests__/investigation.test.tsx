@@ -3,8 +3,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 import { getInvestigationAgentState, InvestigationLoader, InvestigationLog } from "../investigation-loader";
+import InvestigationActivityLog from "../investigation-activity-log";
 import CaseDetails from "@/modules/investigation/components/case-details";
 import InvestigationReport from "@/modules/investigation/components/investigation-report";
+import InvestigationChatroom from "@/modules/investigation/components/investigation-chatroom";
 import { buildGraphLayout, MiniAttackGraph } from "@/modules/investigation/components/attack-graph-preview";
 import type { Case, CaseAttackGraph, TurnRecord } from "@/api";
 import MarkdownContent from "../markdown-content";
@@ -100,6 +102,34 @@ test("investigation Markdown is rendered as readable content", () => {
   assert.doesNotMatch(html, /\*\*Suspicious\*\*/);
 });
 
+test("chatroom exposes an AI summary from the initial investigation turn", () => {
+  const html = renderToStaticMarkup(<InvestigationChatroom caseId="c" value={value} initialTurns={[turn]} />);
+  assert.match(html, /AI summary/);
+  assert.match(html, /Real findings/);
+  assert.match(html, /Based on the initial investigation/);
+});
+
+test("chatroom keeps a fresh successful summary when the saved transcript starts at a later turn", () => {
+  const html = renderToStaticMarkup(<InvestigationChatroom caseId="c" value={value} initialTurns={[{ ...turn, turn_index: 3 }]} />);
+  assert.match(html, /AI summary/);
+  assert.match(html, /Real findings/);
+});
+
+test("chatroom exposes raw retrieval queries in detailed activity mode", () => {
+  const html = renderToStaticMarkup(<InvestigationActivityLog
+    events={[]}
+    initialMode="detailed"
+    trace={{
+      retrievals: [{ source: "cypher", queries: { generated: "MATCH (a:Alert) RETURN a" } }],
+      log: [],
+    }}
+  />);
+  assert.match(html, /Detailed raw/);
+  assert.match(html, /Database and retrieval queries/);
+  assert.match(html, /Neo4j Cypher/);
+  assert.match(html, /MATCH \(a:Alert\) RETURN a/);
+});
+
 test("attack graph layout anchors the backend root cause and fans out related nodes", () => {
   const graph: CaseAttackGraph = {
     case_id: "case-graph",
@@ -118,8 +148,7 @@ test("attack graph layout anchors the backend root cause and fans out related no
 
   const layout = buildGraphLayout(graph);
   assert.equal(layout.rootNodeId, "alert:a1");
-  assert.equal(layout.positions.get("alert:a1")?.x, 72);
-  assert.ok((layout.positions.get("host:mail")?.x ?? 0) > (layout.positions.get("alert:a1")?.x ?? 0));
+  assert.ok((layout.positions.get("host:mail")?.x ?? 0) < (layout.positions.get("alert:a1")?.x ?? 0));
   assert.ok((layout.positions.get("mitre:T1071.001")?.x ?? 0) > (layout.positions.get("alert:a1")?.x ?? 0));
   assert.ok(layout.width > 0);
   assert.ok(layout.height >= 520);
@@ -130,4 +159,6 @@ test("attack graph layout anchors the backend root cause and fans out related no
   assert.match(preview, /Suspicious POST/);
   assert.match(preview, /Graph legend/);
   assert.match(preview, /MITRE technique/);
+  assert.match(preview, /markerEnd=|marker-end/);
+  assert.match(preview, /attack-graph-arrow/);
 });

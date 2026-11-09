@@ -264,10 +264,11 @@ export default function CaseInvestigation({
               caseId={caseId}
               value={value}
               initialTurns={[turn]}
+              initialEvents={progressEvents}
               onSendQuestion={(question, onProgress) => sendChatMessageStream(caseId, question, onProgress)}
             />
           </div>
-          {view === "log" && <InvestigationLog events={progressEvents} />}
+          {view === "log" && <InvestigationLog events={progressEvents} trace={turn.trace} />}
         </TurnResult>}
       </div>
     </div>
