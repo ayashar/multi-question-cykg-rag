@@ -8,8 +8,9 @@ import {
   Search,
   Info,
   Settings,
-  LogOut,
 } from "lucide-react";
+import { CskgLogo } from "@/components/ui/cskg-logo";
+import { LogoutButton } from "@/modules/auth/components/logout-button";
 
 interface NavItem {
   label: string;
@@ -23,30 +24,6 @@ const mainNavItems: NavItem[] = [
   { label: "Time Span Case", href: "/timespan", icon: Search },
   { label: "Past Investigation", href: "/past-investigation", icon: Info },
 ];
-
-function CskgLogo() {
-  return (
-    <svg
-      aria-label="CSKG logo"
-      className="w-11 h-11 shrink-0"
-      role="img"
-      viewBox="0 0 44 44"
-    >
-      <rect width="44" height="44" rx="12" fill="#442b54" />
-      <path
-        d="M14 14 30 14 22 29 14 14Z"
-        fill="none"
-        stroke="#d6c6e1"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="2"
-      />
-      <circle cx="14" cy="14" r="3.5" fill="#fff" />
-      <circle cx="30" cy="14" r="3.5" fill="#fff" />
-      <circle cx="22" cy="29" r="3.5" fill="#fff" />
-    </svg>
-  );
-}
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -108,18 +85,7 @@ export default function Sidebar() {
         <span className="hidden lg:block truncate">Source Configuration</span>
       </Link>
 
-      <button
-        type="button"
-        aria-label="Log Out"
-        title="Log Out"
-        onClick={() => {
-          console.log("Log Out clicked");
-        }}
-        className="group flex h-11 items-center gap-2 px-[18px] py-2.5 rounded-[3px] border-l-2 border-transparent text-red-300 hover:bg-red-50 transition-all duration-150 text-sm font-medium w-full text-left cursor-pointer"
-      >
-        <LogOut className="w-5 h-5 shrink-0 text-red-300" />
-        <span className="hidden lg:block">Log Out</span>
-      </button>
+      <LogoutButton />
     </div>
     </aside >
   );

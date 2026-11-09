@@ -1,10 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import Sidebar from "@/components/ui/sidebar";
-import Navbar from "@/components/ui/navbar";
 import { GlobalLoadingBar } from "@/components/ui/global-loading-bar";
-import { ScreenErrorBoundary } from "@/components/ui/error-states";
+import { AppShell } from "@/components/ui/app-shell";
 
 const fontSans = Geist({
   variable: "--font-google-sans",
@@ -17,7 +15,10 @@ const fontMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ChatBot CSKG",
+  title: {
+    default: "ChatBot CSKG",
+    template: "%s | ChatBot CSKG",
+  },
   description: "Knowledge Graph Cybersecurity System",
 };
 
@@ -31,17 +32,9 @@ export default function RootLayout({
       lang="en"
       className={`${fontSans.variable} ${fontMono.variable} h-full antialiased`}
     >
-      <body className="min-h-screen flex bg-background text-foreground font-sans">
+      <body className="min-h-screen bg-background text-foreground font-sans">
         <GlobalLoadingBar />
-        <Sidebar />
-        <div className="flex-1 flex flex-col min-w-0 min-h-screen">
-          <Navbar />
-          <main className="flex-1 p-5 md:p-8 overflow-y-auto">
-            <ScreenErrorBoundary>
-              {children}
-            </ScreenErrorBoundary>
-          </main>
-        </div>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );
