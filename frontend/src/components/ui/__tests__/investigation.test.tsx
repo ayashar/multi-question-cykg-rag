@@ -27,6 +27,8 @@ test("live agent events control progress and expose completed logs", () => {
   for (const label of ["Guardrails Agent", "Question Generation Agent", "Retrieval Dispatcher", "Evidence Review Agent", "Synthesis Agent", "Grounding Check Agent"]) assert.ok(html.includes(label));
   assert.match(html, /agent\.guardrails/);
   assert.match(html, /Agent activity log/);
+  assert.match(html, /Simplified/);
+  assert.match(html, /Detailed raw/);
   assert.match(html, /Decision: relevant/);
   assert.doesNotMatch(html, /100%|Investigation complete/);
 });

@@ -28,11 +28,6 @@ export function getInvestigationAgentState(
   return "pending";
 }
 
-function formatElapsed(seconds: number | undefined): string {
-  if (seconds === undefined) return "--";
-  return `+${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
-}
-
 export interface InvestigationLoaderProps extends React.HTMLAttributes<HTMLDivElement> {
   startTime?: number;
   caseId?: string;
@@ -147,37 +142,7 @@ export function InvestigationLoader({ startTime, caseId, events = [], className,
               <span className="ml-auto flex items-center gap-1.5 font-b3 text-green-500"><span className="size-2 rounded-full bg-green-500 motion-safe:animate-pulse" />Live</span>
             </div>
             {activityEvents.length || backendLogEvents.length ? (
-              <div className="space-y-4">
-                {activityEvents.length > 0 && (
-                  <ol className="max-h-[350px] space-y-4 overflow-y-auto pr-2" aria-label="Live agent activity log">
-                    {activityEvents.map((event, eventIndex) => (
-                      <li key={`${event.agent}-${eventIndex}`} className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <span className="font-mono text-[11px] text-primary-700">{formatElapsed(event.elapsed_seconds)}</span>
-                          <span className="font-b3 font-semibold">{event.label}</span>
-                          <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-green-500">Complete</span>
-                        </div>
-                        <div className="space-y-1.5 border-l-2 border-primary-300 pl-3">
-                          {event.messages?.map((message) => (
-                            <p key={message} className="font-mono text-xs leading-relaxed text-primary-1000 wrap-anywhere">{message}</p>
-                          ))}
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                )}
-                {backendLogEvents.length > 0 && (
-                  <ol className="max-h-[350px] space-y-2 overflow-y-auto border-t border-primary-300 pt-3 pr-2" aria-label="Live backend agent log">
-                    {backendLogEvents.map((event, eventIndex) => (
-                      <li key={`${event.agent}-${event.timestamp}-${eventIndex}`} className="border-l-2 border-primary-300 pl-3">
-                        <p className="font-mono text-xs leading-relaxed text-primary-1000 wrap-anywhere">
-                          {event.agent ? `[${event.agent}] ` : ""}{event.message}
-                        </p>
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </div>
+              <InvestigationActivityLog events={events} defaultOpen />
             ) : (
               <div className="flex min-h-28 items-center justify-center border border-dashed border-primary-300 bg-background/35 px-4 text-center font-b2 text-primary-800">
                 Agent output will appear here as each pipeline node completes.
