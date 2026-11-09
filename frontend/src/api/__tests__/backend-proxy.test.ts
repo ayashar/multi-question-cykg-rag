@@ -34,11 +34,19 @@ test("backend proxy injects the server key and preserves method, query, and JSON
     },
     body: requestBody,
   });
-  const response = await proxyBackendRequest(request, ["investigations", "time-range"]);
+  const response = await proxyBackendRequest(
+    request,
+    ["investigations", "time-range"],
+    "6ac76e8d-eeb8-4c9c-85f8-0d991a3fbabb",
+  );
 
   assert.equal(target, "https://investigation.internal/api/investigations/time-range?trace=false");
   assert.equal(options?.method, "POST");
   assert.equal(new Headers(options?.headers).get("X-API-Key"), "server-only-key");
+  assert.equal(
+    new Headers(options?.headers).get("X-CSKG-User-ID"),
+    "6ac76e8d-eeb8-4c9c-85f8-0d991a3fbabb",
+  );
   assert.equal(new Headers(options?.headers).get("Content-Type"), "application/json");
   assert.equal(new TextDecoder().decode(options?.body as ArrayBuffer), requestBody);
   assert.equal(response.status, 201);

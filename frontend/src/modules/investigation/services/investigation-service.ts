@@ -3,6 +3,7 @@ import {
   registerCaseLookback, resolveCaseLookback, type Case, type InvestigationProgressEvent, type TimeRangeRequest, type TurnRecord,
 } from "@/api";
 import { getCases, getInvestigatedCases } from "@/modules/cases/services/cases-service";
+import { getActiveAccountId } from "@/lib/supabase/investigation-store";
 import { createDemoTimeRangeInvestigation as createApiDemoTimeRangeInvestigation } from "@/demo/demo-data";
 
 const selectedCases = new Map<string, Case>();
@@ -16,6 +17,11 @@ const CASE_KEY = "cskg_selected_case:";
 const TIME_RANGE_KEY = "cskg_time_range_investigation:";
 const TIME_RANGE_STORE_KEY = "cskg_time_range_investigations";
 const MAX_PERSISTED_TIME_RANGE_INVESTIGATIONS = 20;
+
+function timeRangeStoreKey(): string {
+  const userId = getActiveAccountId();
+  return userId ? `${TIME_RANGE_STORE_KEY}:${userId}` : TIME_RANGE_STORE_KEY;
+}
 
 export interface PreparedTimeRangeInvestigation {
   value: Case;
@@ -43,7 +49,7 @@ function isPreparedTimeRangeInvestigation(value: unknown): value is PreparedTime
 function readPersistedTimeRangeInvestigations(): PreparedTimeRangeInvestigation[] {
   if (typeof window === "undefined") return [];
   try {
-    const stored: unknown = JSON.parse(localStorage.getItem(TIME_RANGE_STORE_KEY) || "[]");
+    const stored: unknown = JSON.parse(localStorage.getItem(timeRangeStoreKey()) || "[]");
     return Array.isArray(stored) ? stored.filter(isPreparedTimeRangeInvestigation) : [];
   } catch {
     return [];
@@ -57,7 +63,7 @@ function persistTimeRangeInvestigation(prepared: PreparedTimeRangeInvestigation)
       (item) => item.value.case_id !== prepared.value.case_id,
     );
     localStorage.setItem(
-      TIME_RANGE_STORE_KEY,
+      timeRangeStoreKey(),
       JSON.stringify([prepared, ...current].slice(0, MAX_PERSISTED_TIME_RANGE_INVESTIGATIONS)),
     );
   } catch {
@@ -110,6 +116,21 @@ export function getPreparedTimeRangeInvestigation(caseId: string): PreparedTimeR
     preparedTimeRangeInvestigations.set(caseId, persisted);
     selectedCases.set(caseId, persisted.value);
     return persisted;
+  }
+  const accountRecord = getInvestigatedCases().find(
+    (record) => record.case_id === caseId && record.source === "manual-time-range" && record.time_range && record.turn,
+  );
+  if (accountRecord?.turn && accountRecord.time_range) {
+    const restored: PreparedTimeRangeInvestigation = {
+      value: accountRecord.case,
+      turn: accountRecord.turn,
+      range: accountRecord.time_range,
+      progress_events: accountRecord.progress_events,
+    };
+    preparedTimeRangeInvestigations.set(caseId, restored);
+    selectedCases.set(caseId, restored.value);
+    persistTimeRangeInvestigation(restored);
+    return restored;
   }
 
   // Migrate manual investigations created before durable local storage was added.

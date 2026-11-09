@@ -2,6 +2,13 @@ import { type InvestigationProgressEvent, type TurnRecord } from "@/api";
 import { type Case, type InvestigatedCaseRecord, type LookbackPreset, LOOKBACK_HOURS_MAP } from "../types";
 import { MOCK_CASES } from "../data/cases-fixture";
 import { getCases as fetchCases, getIngestionStatus, registerCasesLookback, getCaseLookback } from "@/api";
+import {
+  getActiveAccountId,
+  readCachedAccountHistory,
+  saveAccountInvestigation,
+  syncAccountInvestigations,
+  writeCachedAccountHistory,
+} from "@/lib/supabase/investigation-store";
 
 export const INVESTIGATED_CASES_STORAGE_KEY = "cskg_investigated_cases_v2";
 
@@ -26,11 +33,31 @@ export function parseInvestigatedCases(raw: string | null | undefined): Investig
 
 export function getInvestigatedCases(): InvestigatedCaseRecord[] {
   if (typeof window === "undefined") return [];
+  if (getActiveAccountId()) return readCachedAccountHistory();
+  // The v2 key predates account ownership. Never surface it in a real
+  // authenticated browser, because it may belong to whoever used the
+  // device before the current account. Tests and mock mode retain it only
+  // as a backwards-compatible fixture store.
+  if (typeof window.location !== "undefined" && process.env.NEXT_PUBLIC_USE_MOCK !== "true") {
+    return [];
+  }
   try {
     return parseInvestigatedCases(localStorage.getItem(INVESTIGATED_CASES_STORAGE_KEY));
   } catch {
     return [];
   }
+}
+
+export function getInvestigatedCasesSnapshot(): string {
+  try {
+    return JSON.stringify(getInvestigatedCases());
+  } catch {
+    return "[]";
+  }
+}
+
+export async function syncInvestigatedCases(): Promise<InvestigatedCaseRecord[]> {
+  return syncAccountInvestigations();
 }
 
 export function getInvestigatedCase(caseId: string): InvestigatedCaseRecord | undefined {
@@ -51,25 +78,35 @@ export function recordInvestigatedCase(
   source: InvestigatedCaseRecord["source"] = "case-list",
   turn?: TurnRecord,
   progressEvents?: InvestigationProgressEvent[],
+  timeRange?: InvestigatedCaseRecord["time_range"],
 ): void {
   if (typeof window === "undefined") return;
   try {
     const records = getInvestigatedCases();
     const previous = records.find((item) => item.case_id === c.case_id);
     const current = records.filter((item) => item.case_id !== c.case_id);
+    const record: InvestigatedCaseRecord = {
+      case_id: c.case_id,
+      investigated_at: new Date().toISOString(),
+      case: c,
+      turn: turn ?? previous?.turn,
+      progress_events: progressEvents ?? previous?.progress_events,
+      lookback_hours: lookbackHours,
+      source,
+      time_range: timeRange ?? previous?.time_range,
+    };
     const updated: InvestigatedCaseRecord[] = [
-      {
-        case_id: c.case_id,
-        investigated_at: new Date().toISOString(),
-        case: c,
-        turn: turn ?? previous?.turn,
-        progress_events: progressEvents ?? previous?.progress_events,
-        lookback_hours: lookbackHours,
-        source,
-      },
+      record,
       ...current,
     ];
-    localStorage.setItem(INVESTIGATED_CASES_STORAGE_KEY, JSON.stringify(updated.slice(0, 20)));
+    if (getActiveAccountId()) {
+      writeCachedAccountHistory(updated);
+      void saveAccountInvestigation(record, timeRange).catch((err) => {
+        console.warn("Failed to save investigation to Supabase:", err);
+      });
+    } else {
+      localStorage.setItem(INVESTIGATED_CASES_STORAGE_KEY, JSON.stringify(updated.slice(0, 20)));
+    }
     window.dispatchEvent(new Event("cskg-investigation-history-change"));
   } catch (err) {
     console.warn("Failed to record investigated case:", err);

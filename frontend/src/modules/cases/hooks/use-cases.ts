@@ -6,10 +6,11 @@ import { getInvestigations, type InvestigationSummary } from "@/api";
 import {
   excludeInvestigatedCases,
   getCases,
-  INVESTIGATED_CASES_STORAGE_KEY,
+  getInvestigatedCasesSnapshot,
   parseInvestigatedCases,
   recordInvestigatedCase,
   resolveLookbackHours,
+  syncInvestigatedCases,
 } from "../services/cases-service";
 import { listInvestigations } from "@/api";
 
@@ -28,8 +29,7 @@ const subscribeHistory = (callback: () => void) => {
 };
 
 const getHistorySnapshot = () => {
-  try { return localStorage.getItem(INVESTIGATED_CASES_STORAGE_KEY) ?? "[]"; }
-  catch { return "[]"; }
+  return getInvestigatedCasesSnapshot();
 };
 
 const subscribePreset = (callback: () => void) => {
@@ -78,6 +78,7 @@ export function useCases(initialPreset: LookbackPreset = "24h", itemsPerPage: nu
       setError(null);
 
       try {
+        await syncInvestigatedCases().catch(() => []);
         const hours = await resolveLookbackHours(selectedPreset);
         try { sessionStorage.setItem(HOURS_KEY, String(hours)); } catch { /* Persistence is optional. */ }
         const [data, investigations] = await Promise.all([

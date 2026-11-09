@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Case } from "../types";
 import {
-  INVESTIGATED_CASES_STORAGE_KEY,
+  getInvestigatedCasesSnapshot,
   parseInvestigatedCases,
+  syncInvestigatedCases,
 } from "../services/cases-service";
 import CaseTable from "./case-table";
 
@@ -17,13 +18,13 @@ const subscribe = (callback: () => void) => {
   };
 };
 const getSnapshot = () => {
-  try { return localStorage.getItem(INVESTIGATED_CASES_STORAGE_KEY) || "[]"; }
-  catch { return "[]"; }
+  return getInvestigatedCasesSnapshot();
 };
 const getServerSnapshot = () => "[]";
 
 export default function InvestigatedCasesSection({ standalone = false }: { standalone?: boolean }) {
   const historySnapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  useEffect(() => { void syncInvestigatedCases().catch(() => []); }, []);
   const history = parseInvestigatedCases(historySnapshot);
   const investigatedCases: Case[] = history.map((h) => h.case);
   const [page, setPage] = useState<number>(1);

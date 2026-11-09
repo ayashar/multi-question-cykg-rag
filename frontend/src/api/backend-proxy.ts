@@ -55,7 +55,7 @@ function buildTargetUrl(request: Request, path: string[]): URL {
   return target;
 }
 
-function buildRequestHeaders(request: Request): Headers {
+function buildRequestHeaders(request: Request, userId?: string): Headers {
   const headers = new Headers();
   for (const name of requestHeadersToForward) {
     const value = request.headers.get(name);
@@ -64,6 +64,7 @@ function buildRequestHeaders(request: Request): Headers {
 
   const apiKey = process.env.INVESTIGATION_API_KEY?.trim();
   if (apiKey) headers.set("X-API-Key", apiKey);
+  if (userId) headers.set("X-CSKG-User-ID", userId);
   return headers;
 }
 
@@ -76,7 +77,11 @@ function buildResponseHeaders(response: Response): Headers {
   return headers;
 }
 
-export async function proxyBackendRequest(request: Request, path: string[]): Promise<Response> {
+export async function proxyBackendRequest(
+  request: Request,
+  path: string[],
+  userId?: string,
+): Promise<Response> {
   if (!path.length || path.some((segment) => !segment || segment === "." || segment === "..")) {
     return Response.json({ detail: "Invalid backend path." }, { status: 400 });
   }
@@ -87,7 +92,7 @@ export async function proxyBackendRequest(request: Request, path: string[]): Pro
     const body = hasBody ? await request.arrayBuffer() : undefined;
     const upstream = await fetch(buildTargetUrl(request, path), {
       method,
-      headers: buildRequestHeaders(request),
+      headers: buildRequestHeaders(request, userId),
       body: body?.byteLength ? body : undefined,
       cache: "no-store",
       redirect: "manual",

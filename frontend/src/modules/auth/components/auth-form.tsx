@@ -16,6 +16,7 @@ import {
 import { CskgLogo } from "@/components/ui/cskg-logo";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { setActiveAccountId } from "@/lib/supabase/investigation-store";
 
 type AuthMode = "login" | "signup";
 
@@ -31,21 +32,21 @@ function safeNextPath(value?: string) {
 
 function authErrorMessage(message: string) {
   if (/invalid login credentials/i.test(message)) {
-    return "Email atau kata sandi salah.";
+    return "Invalid email or password.";
   }
   if (/email not confirmed/i.test(message)) {
-    return "Email belum diverifikasi. Buka email dari Supabase lalu klik tautan konfirmasi.";
+    return "Your email has not been verified. Open the Supabase verification email and follow the confirmation link.";
   }
   if (/user already registered/i.test(message)) {
-    return "Email ini sudah terdaftar. Silakan masuk.";
+    return "This email is already registered. Please sign in.";
   }
   if (/password should be|weak password/i.test(message)) {
-    return "Kata sandi belum memenuhi ketentuan keamanan.";
+    return "The password does not meet the security requirements.";
   }
   if (/rate limit/i.test(message)) {
-    return "Terlalu banyak percobaan. Tunggu sebentar lalu coba lagi.";
+    return "Too many attempts. Wait a moment, then try again.";
   }
-  return message || "Terjadi kesalahan. Silakan coba lagi.";
+  return message || "Something went wrong. Please try again.";
 }
 
 function Field({
@@ -93,17 +94,17 @@ export function AuthForm({ mode, nextPath, callbackError }: AuthFormProps) {
     setSuccess("");
 
     if (!configured) {
-      setError("Supabase belum dikonfigurasi. Isi frontend/.env.local terlebih dahulu.");
+      setError("Supabase is not configured. Add the required values to frontend/.env.local.");
       return;
     }
 
     if (!isLogin && password !== confirmPassword) {
-      setError("Konfirmasi kata sandi tidak sama.");
+      setError("The passwords do not match.");
       return;
     }
 
     if (!isLogin && password.length < 8) {
-      setError("Kata sandi minimal 8 karakter.");
+      setError("The password must be at least 8 characters long.");
       return;
     }
 
@@ -113,12 +114,13 @@ export function AuthForm({ mode, nextPath, callbackError }: AuthFormProps) {
       const supabase = createClient();
 
       if (isLogin) {
-        const { error: signInError } = await supabase.auth.signInWithPassword({
+        const { data, error: signInError } = await supabase.auth.signInWithPassword({
           email: email.trim(),
           password,
         });
 
         if (signInError) throw signInError;
+        if (data.user) setActiveAccountId(data.user.id);
         window.location.assign(safeNextPath(nextPath));
         return;
       }
@@ -139,19 +141,20 @@ export function AuthForm({ mode, nextPath, callbackError }: AuthFormProps) {
       if (signUpError) throw signUpError;
 
       if (data.session) {
+        if (data.user) setActiveAccountId(data.user.id);
         window.location.assign(redirectPath);
         return;
       }
 
       setSuccess(
-        "Akun berhasil dibuat. Cek inbox atau folder spam untuk memverifikasi emailmu.",
+        "Your account has been created. Check your inbox or spam folder to verify your email.",
       );
       setPassword("");
       setConfirmPassword("");
     } catch (caughtError) {
       setError(
         authErrorMessage(
-          caughtError instanceof Error ? caughtError.message : "Terjadi kesalahan.",
+          caughtError instanceof Error ? caughtError.message : "Something went wrong.",
         ),
       );
     } finally {
@@ -179,10 +182,10 @@ export function AuthForm({ mode, nextPath, callbackError }: AuthFormProps) {
               Secure investigation workspace
             </p>
             <h1 className="text-4xl font-bold leading-tight tracking-[-0.03em] xl:text-5xl">
-              Investigasi insiden dengan konteks yang lebih utuh.
+              Investigate incidents with complete context.
             </h1>
             <p className="mt-5 max-w-sm text-base leading-7 text-primary-200">
-              Satukan alert, attack graph, dan temuan investigasi dalam satu ruang kerja yang aman.
+              Bring alerts, attack graphs, and investigation findings together in one secure workspace.
             </p>
           </div>
 
@@ -196,23 +199,23 @@ export function AuthForm({ mode, nextPath, callbackError }: AuthFormProps) {
             </div>
 
             <p className="text-sm font-semibold text-primary-700">
-              {isLogin ? "SELAMAT DATANG KEMBALI" : "BUAT AKUN BARU"}
+              {isLogin ? "WELCOME BACK" : "CREATE A NEW ACCOUNT"}
             </p>
             <h2 className="mt-2 text-3xl font-bold tracking-[-0.025em] text-neutral-1000">
-              {isLogin ? "Masuk ke akunmu" : "Mulai investigasi"}
+              {isLogin ? "Sign in to your account" : "Start investigating"}
             </h2>
             <p className="mt-3 text-sm leading-6 text-neutral-700">
               {isLogin
-                ? "Gunakan email dan kata sandi yang sudah terdaftar."
-                : "Daftar untuk mengakses dashboard investigasi keamanan."}
+                ? "Use the email and password registered to your account."
+                : "Sign up to access the security investigation dashboard."}
             </p>
 
             {!configured && (
               <div className="mt-6 flex gap-3 rounded-lg border border-yellow-300 bg-yellow-100/40 p-3 text-sm leading-5 text-yellow-500">
                 <AlertCircle className="mt-0.5 size-5 shrink-0" />
                 <p>
-                  Supabase belum terhubung. Salin <code>.env.example</code> menjadi{" "}
-                  <code>.env.local</code>, lalu isi URL dan publishable key.
+                  Supabase is not connected. Copy <code>.env.example</code> to{" "}
+                  <code>.env.local</code>, then add the project URL and publishable key.
                 </p>
               </div>
             )}
@@ -235,12 +238,12 @@ export function AuthForm({ mode, nextPath, callbackError }: AuthFormProps) {
               {!isLogin && (
                 <Field
                   id="full-name"
-                  label="Nama lengkap"
+                  label="Full name"
                   icon={UserRound}
                   name="fullName"
                   type="text"
                   autoComplete="name"
-                  placeholder="Nama lengkapmu"
+                  placeholder="Your full name"
                   value={fullName}
                   onChange={(event) => setFullName(event.target.value)}
                   minLength={2}
@@ -257,7 +260,7 @@ export function AuthForm({ mode, nextPath, callbackError }: AuthFormProps) {
                 type="email"
                 inputMode="email"
                 autoComplete="email"
-                placeholder="nama@email.com"
+                placeholder="name@example.com"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 required
@@ -266,7 +269,7 @@ export function AuthForm({ mode, nextPath, callbackError }: AuthFormProps) {
 
               <div>
                 <label htmlFor="password" className="mb-2 block text-sm font-semibold text-neutral-1000">
-                  Kata sandi
+                  Password
                 </label>
                 <div className="relative">
                   <LockKeyhole className="pointer-events-none absolute left-4 top-1/2 size-[18px] -translate-y-1/2 text-neutral-600" />
@@ -275,7 +278,7 @@ export function AuthForm({ mode, nextPath, callbackError }: AuthFormProps) {
                     name="password"
                     type={showPassword ? "text" : "password"}
                     autoComplete={isLogin ? "current-password" : "new-password"}
-                    placeholder={isLogin ? "Masukkan kata sandi" : "Minimal 8 karakter"}
+                    placeholder={isLogin ? "Enter your password" : "At least 8 characters"}
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     minLength={isLogin ? undefined : 8}
@@ -286,7 +289,7 @@ export function AuthForm({ mode, nextPath, callbackError }: AuthFormProps) {
                   <button
                     type="button"
                     onClick={() => setShowPassword((value) => !value)}
-                    aria-label={showPassword ? "Sembunyikan kata sandi" : "Tampilkan kata sandi"}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
                     className="absolute right-3 top-1/2 grid size-8 -translate-y-1/2 cursor-pointer place-items-center rounded-md text-neutral-600 hover:bg-neutral-100 hover:text-neutral-1000"
                   >
                     {showPassword ? <EyeOff className="size-[18px]" /> : <Eye className="size-[18px]" />}
@@ -297,12 +300,12 @@ export function AuthForm({ mode, nextPath, callbackError }: AuthFormProps) {
               {!isLogin && (
                 <Field
                   id="confirm-password"
-                  label="Konfirmasi kata sandi"
+                  label="Confirm password"
                   icon={LockKeyhole}
                   name="confirmPassword"
                   type={showPassword ? "text" : "password"}
                   autoComplete="new-password"
-                  placeholder="Ulangi kata sandi"
+                  placeholder="Repeat your password"
                   value={confirmPassword}
                   onChange={(event) => setConfirmPassword(event.target.value)}
                   minLength={8}
@@ -320,7 +323,7 @@ export function AuthForm({ mode, nextPath, callbackError }: AuthFormProps) {
                   <LoaderCircle className="size-5 animate-spin" />
                 ) : (
                   <>
-                    {isLogin ? "Masuk" : "Buat akun"}
+                    {isLogin ? "Sign in" : "Create account"}
                     <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
                   </>
                 )}
@@ -328,12 +331,12 @@ export function AuthForm({ mode, nextPath, callbackError }: AuthFormProps) {
             </form>
 
             <p className="mt-7 text-center text-sm text-neutral-700">
-              {isLogin ? "Belum punya akun?" : "Sudah punya akun?"}{" "}
+              {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
               <Link
                 href={isLogin ? "/signup" : "/login"}
                 className="font-bold text-primary-700 hover:text-primary-900 hover:underline"
               >
-                {isLogin ? "Daftar sekarang" : "Masuk"}
+                {isLogin ? "Sign up now" : "Sign in"}
               </Link>
             </p>
           </div>

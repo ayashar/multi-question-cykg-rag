@@ -14,6 +14,11 @@ import {
 } from "../data/chatroom-fixture";
 import InvestigationReport from "./investigation-report";
 import ConfidenceBadge from "./confidence-badge";
+import {
+  getAccountTranscript,
+  getAccountTurnLogs,
+  saveAccountTurn,
+} from "@/lib/supabase/investigation-store";
 
 function QuestionBubble({ children }: { children: ReactNode }) {
   return (
@@ -181,13 +186,20 @@ export default function InvestigationChatroom({
   useEffect(() => {
     if (!investigationReady) return;
     let cancelled = false;
-    void getChatTranscript(caseId, true).then((transcript) => {
+    void Promise.all([
+      getAccountTranscript(caseId).catch(() => []),
+      getAccountTurnLogs(caseId).catch(() => ({})),
+    ]).then(async ([accountTranscript, accountLogs]) => {
+      const transcript = accountTranscript.length
+        ? accountTranscript
+        : await getChatTranscript(caseId, true).catch(() => []);
       if (cancelled || !transcript.length) return;
-      const restoredLogs = Object.fromEntries(
+      const traceLogs = Object.fromEntries(
         transcript
           .filter((turn) => turn.trace?.log?.length)
           .map((turn) => [turn.turn_index, progressEventsFromTrace(turn)]),
       );
+      const restoredLogs = { ...traceLogs, ...accountLogs };
       setChatLogs((current) => ({ ...restoredLogs, ...current }));
       setTurns((current) => {
         const merged = new Map(current.map((turn) => [turn.turn_index, turn]));
@@ -242,6 +254,9 @@ export default function InvestigationChatroom({
           });
       setTurns((current) => [...current, response]);
       setChatLogs((current) => ({ ...current, [response.turn_index]: chatEventsRef.current }));
+      void saveAccountTurn(caseId, response, chatEventsRef.current).catch((reason) => {
+        console.warn("Failed to save chat turn to Supabase:", reason);
+      });
     } catch {
       setSendError("The follow-up response could not be loaded. Try again.");
     } finally {

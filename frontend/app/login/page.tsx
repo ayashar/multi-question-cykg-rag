@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { AuthForm } from "@/modules/auth/components/auth-form";
 
 export const metadata: Metadata = {
-  title: "Masuk",
-  description: "Masuk ke dashboard investigasi ChatBot CSKG.",
+  title: "Sign in",
+  description: "Sign in to the ChatBot CSKG investigation dashboard.",
 };
 
 interface LoginPageProps {
@@ -12,7 +12,7 @@ interface LoginPageProps {
 
 const callbackErrors: Record<string, string> = {
   auth_callback_failed:
-    "Tautan verifikasi tidak valid atau sudah kedaluwarsa. Silakan daftar ulang.",
+    "The verification link is invalid or has expired. Please sign up again.",
 };
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {

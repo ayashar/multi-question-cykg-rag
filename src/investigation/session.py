@@ -30,6 +30,7 @@ the pattern src/ingestion/trigger.py used for auto_trigger_log.jsonl.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -63,7 +64,7 @@ INITIAL_DIRECTIVE = (
 checkpointer = FileCheckpointSaver(CHECKPOINT_DIR)
 checkpointed_app = workflow.compile(checkpointer=checkpointer)
 
-# Keyed by case_id (== LangGraph thread_id). Rebuilt after a restart from the
+# Keyed by an account-scoped thread key (user_id + case_id). Rebuilt after a restart from the
 # audit log (_transcripts) and data/checkpoints/ (_case_by_id, lazily).
 # Individual retrieval calls have their own deadlines, but a provider can
 # still leave the whole graph waiting indefinitely during synthesis. Keep the
@@ -105,6 +106,9 @@ class InvestigationTimeoutError(TimeoutError):
 
 
 class TurnRecord(BaseModel):
+    # Needed for the durable audit log and in-memory ownership lookup, but
+    # never returned in API responses or copied into the browser payload.
+    owner_id: str = Field(default="legacy", exclude=True)
     case_id: str
     turn_index: int
     question: str
@@ -127,6 +131,11 @@ class TurnRecord(BaseModel):
     trace: Optional[dict] = None
 
 
+def thread_key(owner_id: str, case_id: str) -> str:
+    """Internal key for a user's conversation about a shared Neo4j case."""
+    return f"{owner_id}:{case_id}"
+
+
 def load_transcripts() -> int:
     """Reload past turns from the audit log into the in-memory transcripts.
     Skips cases already held in memory and unreadable lines. Returns the
@@ -144,27 +153,28 @@ def load_transcripts() -> int:
             except Exception:
                 logger.warning("[investigation] skipped an unreadable line in %s", LOG_PATH)
                 continue
-            if record.case_id in _transcripts and record.case_id not in _restored:
+            key = thread_key(record.owner_id, record.case_id)
+            if key in _transcripts and key not in _restored:
                 continue
-            turns = _transcripts.setdefault(record.case_id, [])
+            turns = _transcripts.setdefault(key, [])
             if any(t.turn_index == record.turn_index for t in turns):
                 continue
             turns.append(record)
-            _restored.add(record.case_id)
+            _restored.add(key)
             loaded += 1
     for turns in _transcripts.values():
         turns.sort(key=lambda t: t.turn_index)
     return loaded
 
 
-def _case_path(case_id: str) -> Path:
-    return CHECKPOINT_DIR / f"{safe_filename(case_id)}.case.json"
+def _case_path(key: str) -> Path:
+    return CHECKPOINT_DIR / f"{safe_filename(key)}.case.json"
 
 
-def _save_case(case: Case) -> None:
+def _save_case(key: str, case: Case) -> None:
     try:
         CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
-        path = _case_path(case.case_id)
+        path = _case_path(key)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(case.model_dump_json())
         tmp.replace(path)
@@ -172,8 +182,8 @@ def _save_case(case: Case) -> None:
         logger.warning("[investigation] could not save case %s", case.case_id, exc_info=True)
 
 
-def _load_case(case_id: str) -> Optional[Case]:
-    path = _case_path(case_id)
+def _load_case(key: str, expected_case_id: str) -> Optional[Case]:
+    path = _case_path(key)
     if not path.exists():
         return None
     try:
@@ -181,40 +191,40 @@ def _load_case(case_id: str) -> Optional[Case]:
     except Exception:
         logger.warning("[investigation] could not read %s", path, exc_info=True)
         return None
-    return case if case.case_id == case_id else None
+    return case if case.case_id == expected_case_id else None
 
 
-def _persist_state(case_id: str) -> None:
+def _persist_state(key: str) -> None:
     """Save the case's latest pipeline state so the conversation can be
     resumed after a restart. A failure here never fails the turn itself."""
     try:
-        checkpointer.persist(case_id)
+        checkpointer.persist(key)
     except Exception:
-        logger.warning("[investigation] could not save pipeline state for %s", case_id, exc_info=True)
+        logger.warning("[investigation] could not save pipeline state for %s", key, exc_info=True)
 
 
-def is_resumable(case_id: str) -> bool:
-    if case_id not in _transcripts:
+def is_resumable(key: str) -> bool:
+    if key not in _transcripts:
         return False
-    if case_id not in _restored or case_id in _case_by_id:
+    if key not in _restored or key in _case_by_id:
         return True
-    return checkpointer.has_checkpoint(case_id)
+    return checkpointer.has_checkpoint(key)
 
 
-def _ensure_resumable(case_id: str) -> None:
+def _ensure_resumable(key: str, case_id: str) -> None:
     """For a case reloaded after a restart: bring back its Case and check its
     pipeline state was saved. Raises CaseNotResumable otherwise."""
-    if case_id not in _restored or case_id in _case_by_id:
+    if key not in _restored or key in _case_by_id:
         return
-    if not checkpointer.restore(case_id):
+    if not checkpointer.restore(key):
         raise CaseNotResumable(
             f"Case {case_id} was reloaded from the audit log after a restart and has no saved pipeline "
             f"state (it was investigated before conversations were saved), so it cannot take follow-ups. "
             f"Its turns remain readable.")
-    case = _load_case(case_id)
+    case = _load_case(key, case_id)
     if case is not None:
-        _case_by_id[case_id] = case
-    _restored.discard(case_id)
+        _case_by_id[key] = case
+    _restored.discard(key)
     logger.info("[investigation] case=%s resumed from saved state", case_id)
 
 
@@ -229,7 +239,9 @@ def _safe_trace(result: dict, log: list) -> Optional[dict]:
 def _append_log(record: TurnRecord) -> None:
     LOG_PATH.parent.mkdir(exist_ok=True)
     with open(LOG_PATH, "a") as f:
-        f.write(record.model_dump_json() + "\n")
+        payload = record.model_dump()
+        payload["owner_id"] = record.owner_id
+        f.write(json.dumps(payload, default=str) + "\n")
 
 
 _RETRYABLE_PROVIDER_STATUS = {408, 409, 429, 500, 502, 503, 504, 520, 522, 524}
@@ -247,7 +259,7 @@ def _pipeline_error_message(exc: Exception) -> str:
     return str(exc) or f"{type(exc).__name__} without a message"
 
 
-async def _run_turn(case_id: str, question: str, extra_state: dict) -> TurnRecord:
+async def _run_turn(owner_id: str, case_id: str, question: str, extra_state: dict) -> TurnRecord:
     """Invokes checkpointed_app on the given thread. `grounding_retry_count`
     is always reset to 0 here even though it isn't a reducer field: without
     this, a turn that ended after a grounding-check retry (count=1) would
@@ -265,16 +277,17 @@ async def _run_turn(case_id: str, question: str, extra_state: dict) -> TurnRecor
         "grounding_result": None,
         **extra_state,
     }
-    config = {"configurable": {"thread_id": case_id}, "recursion_limit": 30}
-    turn_index = len(_transcripts.get(case_id, [])) + 1
+    key = thread_key(owner_id, case_id)
+    config = {"configurable": {"thread_id": key}, "recursion_limit": 30}
+    turn_index = len(_transcripts.get(key, [])) + 1
     install_log_handler()
-    token = current_case.set(case_id)
-    bus.start_turn(case_id, turn_index, question)
+    token = current_case.set(key)
+    bus.start_turn(key, turn_index, question)
     start = time.monotonic()
     async def consume_graph() -> dict:
         async for update in checkpointed_app.astream(state, config=config, stream_mode="updates"):
             for node, node_update in (update or {}).items():
-                bus.publish(case_id, {
+                bus.publish(key, {
                     "type": "step_completed", "node": node,
                     "label": STEP_LABELS.get(node, node),
                     "summary": summarize_update(node, node_update),
@@ -297,10 +310,11 @@ async def _run_turn(case_id: str, question: str, extra_state: dict) -> TurnRecor
     finally:
         current_case.reset(token)
     latency = time.monotonic() - start
-    _persist_state(case_id)
+    _persist_state(key)
 
     report = result.get("synthesized_report") or {}
     record = TurnRecord(
+        owner_id=owner_id,
         case_id=case_id,
         turn_index=turn_index,
         question=question,
@@ -317,7 +331,7 @@ async def _run_turn(case_id: str, question: str, extra_state: dict) -> TurnRecor
         validation_notice=report.get("validation_notice") or None,
         validation=report.get("validation"),
         source_status=report.get("source_status"),
-        trace=_safe_trace(result, bus.logs(case_id)),
+        trace=_safe_trace(result, bus.logs(key)),
     )
     logger.info(
         f"[investigation] case={case_id} turn={turn_index} latency={record.latency_seconds}s "
@@ -334,7 +348,7 @@ async def _run_turn(case_id: str, question: str, extra_state: dict) -> TurnRecor
         # cross-case knowledge base as a learned finding.
         grounded=grounding_result.get('valid', grounding_result.get('grounded')),
     ):
-        case = _case_by_id.get(case_id)
+        case = _case_by_id.get(key)
         if case is not None:
             await asyncio.to_thread(
                 store_finding,
@@ -351,9 +365,9 @@ async def _run_turn(case_id: str, question: str, extra_state: dict) -> TurnRecor
             )
             logger.info(f"[investigation] case={case_id} turn={turn_index} -- stored as LearnedFinding")
 
-    _transcripts.setdefault(case_id, []).append(record)
+    _transcripts.setdefault(key, []).append(record)
     _append_log(record)
-    bus.publish(case_id, {
+    bus.publish(key, {
         "type": "turn_failed" if record.error else "turn_completed",
         "turn_index": turn_index, "error": record.error,
         "latency_seconds": record.latency_seconds,
@@ -361,25 +375,26 @@ async def _run_turn(case_id: str, question: str, extra_state: dict) -> TurnRecor
     return record
 
 
-async def start_investigation(case: Case, alerts: List[Alert]) -> TurnRecord:
+async def start_investigation(owner_id: str, case: Case, alerts: List[Alert]) -> TurnRecord:
     """Idempotent: a case that's already been opened returns its existing
     successful initial turn instead of re-running the pipeline (and spending
     another round of LLM calls). Failed initial attempts can be retried and
     remain in the transcript/audit log. Use ask_followup for continued Q&A
     on an already-started case."""
-    if case.case_id in _transcripts:
+    key = thread_key(owner_id, case.case_id)
+    if key in _transcripts:
         # Re-opening a case after a restart hands us its Case again; keep it
         # so follow-ups anchor to the case's own time and can store findings.
-        if case.case_id not in _case_by_id:
-            _case_by_id[case.case_id] = case
-            _save_case(case)
-        for record in _transcripts[case.case_id]:
+        if key not in _case_by_id:
+            _case_by_id[key] = case
+            _save_case(key, case)
+        for record in _transcripts[key]:
             if record.question == INITIAL_DIRECTIVE and record.error is None:
                 return record
-    _case_by_id[case.case_id] = case
-    _save_case(case)
+    _case_by_id[key] = case
+    _save_case(key, case)
     case_context = build_case_context(case, alerts)
-    return await _run_turn(case.case_id, INITIAL_DIRECTIVE, {
+    return await _run_turn(owner_id, case.case_id, INITIAL_DIRECTIVE, {
         "case_context": case_context,
         # Seeds question_generation_node's guaranteed mitigation-lookup
         # question (src/graph/state.py) with the case's own native+sigma
@@ -407,11 +422,12 @@ async def start_investigation(case: Case, alerts: List[Alert]) -> TurnRecord:
     })
 
 
-async def ask_followup(case_id: str, message: str) -> TurnRecord:
-    if case_id not in _transcripts:
+async def ask_followup(owner_id: str, case_id: str, message: str) -> TurnRecord:
+    key = thread_key(owner_id, case_id)
+    if key not in _transcripts:
         raise ValueError(f"No investigation started for case {case_id} yet -- call start_investigation first.")
-    _ensure_resumable(case_id)
-    case = _case_by_id.get(case_id)
+    _ensure_resumable(key, case_id)
+    case = _case_by_id.get(key)
     # case_context is deliberately NOT resent: it's a non-reducer state
     # field, so LangGraph's checkpointer keeps turn 1's value automatically
     # when a later turn's partial state update omits it. skip_guardrails,
@@ -423,22 +439,23 @@ async def ask_followup(case_id: str, message: str) -> TurnRecord:
     extra = {"skip_guardrails": False}
     if case is not None:
         extra["query_timestamp"] = case.last_seen
-    elif not checkpointer.has_checkpoint(case_id):
+    elif not checkpointer.has_checkpoint(key):
         extra["query_timestamp"] = now_iso()
     # (otherwise the saved state already holds the case's query_timestamp)
-    return await _run_turn(case_id, message, extra)
+    return await _run_turn(owner_id, case_id, message, extra)
 
 
-def get_transcript(case_id: str) -> List[TurnRecord]:
-    return _transcripts.get(case_id, [])
+def get_transcript(owner_id: str, case_id: str) -> List[TurnRecord]:
+    return _transcripts.get(thread_key(owner_id, case_id), [])
 
 
-def summarize(case_id: str) -> Optional[InvestigationSummary]:
-    turns = _transcripts.get(case_id)
+def summarize(owner_id: str, case_id: str) -> Optional[InvestigationSummary]:
+    key = thread_key(owner_id, case_id)
+    turns = _transcripts.get(key)
     if not turns:
         return None
     first, last = turns[0], turns[-1]
-    case = _case_by_id.get(case_id) or _load_case(case_id)
+    case = _case_by_id.get(key) or _load_case(key, case_id)
     preview = (last.answer or "")[:280] or None
     return InvestigationSummary(
         case_id=case_id,
@@ -450,13 +467,17 @@ def summarize(case_id: str) -> Optional[InvestigationSummary]:
         recommended_priority=next((t.recommended_priority for t in reversed(turns) if t.recommended_priority), None),
         hosts=case.hosts if case else [],
         alert_count=case.alert_count if case else None,
-        resumable=is_resumable(case_id),
-        running=bus.is_running(case_id),
+        resumable=is_resumable(key),
+        running=bus.is_running(key),
     )
 
 
-def list_investigations() -> List[InvestigationSummary]:
+def list_investigations(owner_id: str) -> List[InvestigationSummary]:
     """Every conversation known to this process (including ones reloaded
     from the audit log), most recently active first."""
-    summaries = [s for s in (summarize(cid) for cid in list(_transcripts)) if s is not None]
+    case_ids = {
+        turns[0].case_id for turns in _transcripts.values()
+        if turns and turns[0].owner_id == owner_id
+    }
+    summaries = [s for s in (summarize(owner_id, cid) for cid in case_ids) if s is not None]
     return sorted(summaries, key=lambda s: s.last_timestamp, reverse=True)

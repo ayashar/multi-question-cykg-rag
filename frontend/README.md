@@ -2,28 +2,30 @@
 
 ### Frontend demo mode
 
-The frontend runs in self-contained demo mode by default. Cases, investigations,
-reports, time-range results, attack graphs, chat endpoint responses, ingestion
-status, and source configuration all use local dummy data and do not contact the
-backend. This makes every implemented screen available with only:
+The frontend uses demo investigation data by default. Cases, reports, time-range
+results, attack graphs, chat endpoint responses, ingestion status, and source
+configuration do not contact FastAPI in this mode. Authentication and per-account
+history still use Supabase, so configure Supabase and apply the migration in
+[`SUPABASE_SETUP.md`](./SUPABASE_SETUP.md) before testing account persistence.
 
 ```bash
 pnpm dev
 ```
 
 Set `NEXT_PUBLIC_USE_MOCK=false` before starting or building the frontend to use
-the real investigation API. Demo source-configuration changes are kept only in
-frontend memory, while investigation history uses browser local storage.
+the real investigation API. Demo source-configuration changes remain in frontend
+memory, while completed reports, chats, and activity logs are stored per account
+in Supabase with an account-scoped browser cache.
 
 ### Investigation API
 
 The frontend handles `/backend/*` with a server-side Next.js route and forwards
 requests to `http://127.0.0.1:8000` by default, avoiding browser CORS issues.
 Set server-only `INVESTIGATION_API_URL` to change that destination and
-`INVESTIGATION_API_KEY` when the API requires a key. The key is added by the
-Next.js server and is never included in browser JavaScript. When live mode is
-enabled, request failures remain visible and the server route allows up to 120
-seconds for investigations.
+`INVESTIGATION_API_KEY` when the API requires a key. The key and verified
+Supabase user ID are added by the Next.js server and are never accepted from
+browser JavaScript. When live mode is enabled, request failures remain visible
+and the server route allows up to 10 minutes for an investigation.
 
 Import endpoint functions from `@/api`. The shared client tracks pending requests
 and preserves each case's first discovery lookback in session storage (with an
@@ -38,7 +40,8 @@ and `useApiLoading` for request state.
 
 Select **Investigate** from `/cases` to open `/cases/[caseId]`. The selected case
 and its original discovery window are carried into the investigation. Direct
-links accept `?lookback_hours=720`; successful cases are added to local history.
+links accept `?lookback_hours=720`; successful cases are added to the signed-in
+user's Supabase history.
 
 The loading card estimates four stages at 0, 12, 26, and 42 seconds: Reviewing
 evidence, Correlating related alerts, Building investigation findings, and
@@ -57,8 +60,9 @@ backend call. The longer four-stage sequence remains available in live mode.
 
 ### FR3 — Manual time-range investigation
 
-Manual investigations are persisted in browser local storage so their original
-time range and completed result survive refreshes and later browser sessions.
+Manual investigations are persisted in Supabase so their original time range and
+completed result survive refreshes and later browser sessions. A per-account
+browser cache keeps reopening responsive when the network is temporarily slow.
 The form rejects future dates and ranges longer than 31 days by default. Set
 `NEXT_PUBLIC_MAX_TIME_RANGE_DAYS` to a positive number to change that UI limit.
 

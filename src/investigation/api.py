@@ -52,6 +52,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
+from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -74,6 +75,14 @@ async def require_api_key(request: Request, x_api_key: str = Header(default=""))
         x_api_key = request.query_params.get("api_key", "")
     if x_api_key != INVESTIGATION_API_KEY:
         raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key.")
+
+
+async def current_user_id(x_cskg_user_id: str = Header(default="")) -> str:
+    """Trust only the server-side Next proxy to supply the Supabase user id."""
+    try:
+        return str(UUID(x_cskg_user_id))
+    except (TypeError, ValueError, AttributeError):
+        raise HTTPException(status_code=401, detail="Missing or invalid account identity.")
 
 
 @asynccontextmanager
@@ -108,7 +117,11 @@ async def get_cases(lookback_hours: float = 24.0) -> list[clustering.Case]:
 
 
 @app.post("/cases/{case_id}/investigate")
-async def investigate_case(case_id: str, lookback_hours: float = clustering.DEFAULT_FIND_LOOKBACK_HOURS) -> session.TurnRecord:
+async def investigate_case(
+    case_id: str,
+    lookback_hours: float = clustering.DEFAULT_FIND_LOOKBACK_HOURS,
+    user_id: str = Depends(current_user_id),
+) -> session.TurnRecord:
     """`lookback_hours` must cover whatever window you used to list this
     case via GET /cases -- case_id is a hash of an alert set (see
     clustering.py), and re-clustering over a window that doesn't reach the
@@ -126,7 +139,7 @@ async def investigate_case(case_id: str, lookback_hours: float = clustering.DEFA
             ),
         )
     alerts = clustering.fetch_alerts_by_ids(case.alert_ids)
-    return await session.start_investigation(case, alerts)
+    return await session.start_investigation(user_id, case, alerts)
 
 
 @app.get("/cases/{case_id}/attack-graph")
@@ -146,31 +159,41 @@ async def get_attack_graph(
 
 
 @app.post("/investigations/time-range")
-async def investigate_time_range(body: TimeRangeRequest) -> session.TurnRecord:
+async def investigate_time_range(
+    body: TimeRangeRequest,
+    user_id: str = Depends(current_user_id),
+) -> session.TurnRecord:
     case = clustering.case_from_range(body.start, body.end)
     if case is None:
         raise HTTPException(status_code=404, detail=f"No alerts found between {body.start} and {body.end}.")
     alerts = clustering.fetch_alerts_by_ids(case.alert_ids)
-    return await session.start_investigation(case, alerts)
+    return await session.start_investigation(user_id, case, alerts)
 
 
 @app.get("/investigations")
-async def list_investigations() -> list[session.InvestigationSummary]:
-    return session.list_investigations()
+async def list_investigations(user_id: str = Depends(current_user_id)) -> list[session.InvestigationSummary]:
+    return session.list_investigations(user_id)
 
 
 @app.get("/investigations/{case_id}")
-async def get_investigation(case_id: str) -> session.InvestigationSummary:
-    summary = session.summarize(case_id)
+async def get_investigation(
+    case_id: str,
+    user_id: str = Depends(current_user_id),
+) -> session.InvestigationSummary:
+    summary = session.summarize(user_id, case_id)
     if summary is None:
         raise HTTPException(status_code=404, detail=f"No investigation started for case {case_id} yet.")
     return summary
 
 
 @app.post("/investigations/{case_id}/chat")
-async def chat(case_id: str, body: ChatRequest) -> session.TurnRecord:
+async def chat(
+    case_id: str,
+    body: ChatRequest,
+    user_id: str = Depends(current_user_id),
+) -> session.TurnRecord:
     try:
-        return await session.ask_followup(case_id, body.message)
+        return await session.ask_followup(user_id, case_id, body.message)
     except session.CaseNotResumable as e:
         raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
@@ -178,18 +201,26 @@ async def chat(case_id: str, body: ChatRequest) -> session.TurnRecord:
 
 
 @app.get("/investigations/{case_id}/chat")
-async def get_chat(case_id: str, include_trace: bool = False) -> list[session.TurnRecord]:
+async def get_chat(
+    case_id: str,
+    include_trace: bool = False,
+    user_id: str = Depends(current_user_id),
+) -> list[session.TurnRecord]:
     """The transcript. Traces are large, so they are left out unless asked
     for -- fetch one turn's via .../turns/{turn_index}/trace instead."""
-    turns = session.get_transcript(case_id)
+    turns = session.get_transcript(user_id, case_id)
     if include_trace:
         return turns
     return [t.model_copy(update={"trace": None}) for t in turns]
 
 
 @app.get("/investigations/{case_id}/turns/{turn_index}/trace")
-async def get_turn_trace(case_id: str, turn_index: int) -> dict:
-    for turn in session.get_transcript(case_id):
+async def get_turn_trace(
+    case_id: str,
+    turn_index: int,
+    user_id: str = Depends(current_user_id),
+) -> dict:
+    for turn in session.get_transcript(user_id, case_id):
         if turn.turn_index == turn_index:
             if turn.trace is None:
                 raise HTTPException(status_code=404, detail="This turn has no recorded trace.")
@@ -202,14 +233,20 @@ def _sse(event: dict) -> str:
 
 
 @app.get("/investigations/{case_id}/events")
-async def investigation_events(case_id: str, wait: bool = False, heartbeat: float = 15.0) -> StreamingResponse:
+async def investigation_events(
+    case_id: str,
+    wait: bool = False,
+    heartbeat: float = 15.0,
+    user_id: str = Depends(current_user_id),
+) -> StreamingResponse:
     """Server-sent events for the case's current turn: turn_started,
     step_completed, log, then turn_completed or turn_failed (the stream ends
     there). Connecting late replays the turn so far. With nothing running it
     replays the last turn and ends; pass ?wait=true to open the stream
     before POSTing the question and wait for the next turn instead."""
     async def stream():
-        async for event in bus.subscribe(case_id, wait=wait, heartbeat=heartbeat):
+        key = session.thread_key(user_id, case_id)
+        async for event in bus.subscribe(key, wait=wait, heartbeat=heartbeat):
             yield ": keep-alive\n\n" if event is None else _sse(event)
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

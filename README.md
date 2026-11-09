@@ -84,9 +84,11 @@ Make sure again that the .env file is filled !!!
 managed Neo4j AuraDB instance) -- there is no local/self-hosted Neo4j path in
 the code, regardless of what earlier versions of this README implied.
 `LANGCHAIN_*` are optional (LangSmith tracing); leave them blank to skip
-tracing. `INVESTIGATION_API_KEY` is optional too -- unset means the
-investigation API (below) is open, matching local-dev convention; set it to
-require an `X-API-Key` header on every request.
+tracing. `INVESTIGATION_API_KEY` may be omitted only for isolated local
+development. Production must set it in both FastAPI and the Next.js server so
+the investigation API requires an `X-API-Key` on every request. Account-scoped
+routes also require the verified Supabase UUID forwarded by Next.js as
+`X-CSKG-User-ID`; do not expose an unkeyed FastAPI service publicly.
 
 ```bash
 OPENAI_API_KEY=
@@ -190,16 +192,25 @@ With the investigation API running, an analyst reviews and investigates what's b
 curl -s "http://127.0.0.1:8000/cases?lookback_hours=24" | python3 -m json.tool
 
 # Launch/resume the initial investigation on a case from that list
-curl -s -X POST "http://127.0.0.1:8000/cases/<case_id>/investigate" | python3 -m json.tool
+curl -s -X POST "http://127.0.0.1:8000/cases/<case_id>/investigate" \
+  -H "X-CSKG-User-ID: <supabase-user-uuid>" | python3 -m json.tool
 
 # Ask a follow-up in that case's chatroom -- grounded in the case and everything found so far
 curl -s -X POST "http://127.0.0.1:8000/investigations/<case_id>/chat" \
+  -H "X-CSKG-User-ID: <supabase-user-uuid>" \
   -H "Content-Type: application/json" -d '{"message": "..."}' | python3 -m json.tool
 
 # Or investigate an explicit time range instead of a clustered case
 curl -s -X POST "http://127.0.0.1:8000/investigations/time-range" \
+  -H "X-CSKG-User-ID: <supabase-user-uuid>" \
   -H "Content-Type: application/json" -d '{"start": "...", "end": "..."}' | python3 -m json.tool
 ```
+
+Those direct calls are for isolated local development. In production, use the
+authenticated Next.js `/backend/*` proxy so the browser cannot choose its own
+user ID, and include `X-API-Key` in direct operational requests when the API key
+is configured. Supabase setup, migration, and deployment notes live in
+[`frontend/SUPABASE_SETUP.md`](frontend/SUPABASE_SETUP.md).
 
 FastAPI's interactive docs (`http://127.0.0.1:8000/docs`) list every route, including
 `GET /cases/{case_id}/attack-graph` for a reconstructed attack-chain view of a case. See

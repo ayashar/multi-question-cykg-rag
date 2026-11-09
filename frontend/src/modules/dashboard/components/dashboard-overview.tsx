@@ -3,14 +3,15 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { ArrowUpRight, ChevronRight, MessageSquare, Search } from "lucide-react";
+import { Activity, ArrowUpRight, ChevronRight, MessageSquare, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { InvestigationLoader } from "@/components/ui/investigation-loader";
 import { useCases } from "@/modules/cases/hooks/use-cases";
 import {
   excludeInvestigatedCases,
-  INVESTIGATED_CASES_STORAGE_KEY,
+  getInvestigatedCasesSnapshot,
   parseInvestigatedCases,
+  syncInvestigatedCases,
 } from "@/modules/cases/services/cases-service";
 import { MOCK_CASES } from "@/modules/cases/data/cases-fixture";
 import { getUrgencyStripeColor } from "@/modules/cases/components/urgency-indicator";
@@ -36,11 +37,7 @@ const historySubscribe = (callback: () => void) => {
 };
 
 const historySnapshot = () => {
-  try {
-    return localStorage.getItem(INVESTIGATED_CASES_STORAGE_KEY) ?? "[]";
-  } catch {
-    return "[]";
-  }
+  return getInvestigatedCasesSnapshot();
 };
 
 function displayHost(value: Case): { primary: string; secondary: string } {
@@ -340,6 +337,7 @@ export default function DashboardOverview() {
     }
 
     void loadCurrentUserName();
+    void syncInvestigatedCases().catch(() => []);
 
     return () => {
       isMounted = false;

@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { AuthForm } from "@/modules/auth/components/auth-form";
 
 export const metadata: Metadata = {
-  title: "Daftar",
-  description: "Buat akun ChatBot CSKG.",
+  title: "Sign up",
+  description: "Create a ChatBot CSKG account.",
 };
 
 interface SignupPageProps {

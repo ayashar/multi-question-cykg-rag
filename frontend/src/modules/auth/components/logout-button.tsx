@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { LoaderCircle, LogOut } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { clearActiveAccountId } from "@/lib/supabase/investigation-store";
 
 export function LogoutButton() {
   const [pending, setPending] = useState(false);
@@ -22,10 +23,11 @@ export function LogoutButton() {
 
       if (signOutError) throw signOutError;
 
+      clearActiveAccountId();
       router.replace("/login");
       router.refresh();
     } catch {
-      setError("Gagal keluar. Coba lagi.");
+      setError("Could not sign out. Try again.");
       setPending(false);
     }
   }
@@ -45,7 +47,7 @@ export function LogoutButton() {
         ) : (
           <LogOut className="size-5 shrink-0 text-red-300" />
         )}
-        <span className="hidden lg:block">{pending ? "Keluar..." : "Log Out"}</span>
+        <span className="hidden lg:block">{pending ? "Signing out..." : "Log Out"}</span>
       </button>
       {error && (
         <p role="alert" className="hidden px-[18px] pt-1 text-xs text-red-400 lg:block">

@@ -116,6 +116,7 @@ export default function CaseInvestigation({
             prepared ? "manual-time-range" : "case-list",
             result,
             progressEventsRef.current,
+            prepared?.range,
           );
         }
       } catch (reason) {
@@ -137,6 +138,7 @@ export default function CaseInvestigation({
       isManualTimeRange ? "manual-time-range" : "case-list",
       turn,
       progressEvents,
+      isManualTimeRange ? getPreparedTimeRangeInvestigation(caseId)?.range : undefined,
     );
   }, [caseId, isManualTimeRange, lookbackHours, progressEvents, turn, value]);
 
