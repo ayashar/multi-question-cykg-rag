@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ArrowUpRight, ChevronRight, MessageSquare, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { InvestigationLoader } from "@/components/ui/investigation-loader";
@@ -24,6 +24,7 @@ import {
 } from "@/modules/investigation/services/investigation-service";
 import { validateTimeRange } from "@/modules/investigation/services/time-range-validation";
 import type { InvestigationProgressEvent } from "@/api";
+import { createClient } from "@/lib/supabase/client";
 
 const historySubscribe = (callback: () => void) => {
   window.addEventListener("storage", callback);
@@ -169,6 +170,7 @@ function CaseQueue({ cases, isLoading }: { cases: Case[]; isLoading: boolean }) 
 
 export default function DashboardOverview() {
   const router = useRouter();
+  const [firstName, setFirstName] = useState("User");
   const { cases, isLoading, error } = useCases("24h", 5);
   const storedHistory = useSyncExternalStore(historySubscribe, historySnapshot, () => "[]");
   const history = useMemo(() => parseInvestigatedCases(storedHistory), [storedHistory]);
@@ -184,6 +186,37 @@ export default function DashboardOverview() {
   const [rangeProgressEvents, setRangeProgressEvents] = useState<InvestigationProgressEvent[]>([]);
   const rangeProgressRef = useRef<InvestigationProgressEvent[]>([]);
   const [rangeStartedAt, setRangeStartedAt] = useState<number>();
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadCurrentUserName() {
+      try {
+        const supabase = createClient();
+        const { data, error: userError } = await supabase.auth.getUser();
+
+        if (userError || !data.user || !isMounted) return;
+
+        const metadata = data.user.user_metadata;
+        const displayName =
+          (typeof metadata.full_name === "string" && metadata.full_name) ||
+          (typeof metadata.name === "string" && metadata.name) ||
+          data.user.email?.split("@")[0] ||
+          "User";
+        const firstWord = displayName.trim().split(/\s+/)[0];
+
+        if (firstWord) setFirstName(firstWord);
+      } catch {
+        // The proxy already protects this page; keep the neutral fallback.
+      }
+    }
+
+    void loadCurrentUserName();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   async function handleTimeRangeSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -216,7 +249,7 @@ export default function DashboardOverview() {
     <div className="mx-auto w-full max-w-[1440px] pb-10">
       <section className="mb-5">
         <h1 className="text-3xl font-bold tracking-tight text-black-600 sm:text-[36px] sm:leading-tight">
-          Welcome back, User!
+          Welcome back, {firstName}!
         </h1>
         <p className="mt-1 text-base text-neutral-1000">Monitor your case</p>
       </section>
