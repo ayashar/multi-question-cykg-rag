@@ -7,7 +7,7 @@ import InvestigationActivityLog from "../investigation-activity-log";
 import CaseDetails from "@/modules/investigation/components/case-details";
 import InvestigationReport from "@/modules/investigation/components/investigation-report";
 import InvestigationChatroom from "@/modules/investigation/components/investigation-chatroom";
-import { buildGraphLayout, MiniAttackGraph } from "@/modules/investigation/components/attack-graph-preview";
+import { buildGraphLayout, createDisplayGraph, MiniAttackGraph } from "@/modules/investigation/components/attack-graph-preview";
 import type { Case, CaseAttackGraph, TurnRecord } from "@/api";
 import MarkdownContent from "../markdown-content";
 
@@ -157,10 +157,35 @@ test("attack graph layout anchors the backend root cause and fans out related no
 
   const preview = renderToStaticMarkup(<MiniAttackGraph graph={graph} />);
   assert.match(preview, /Attack graph preview with 3 nodes and 2 relationships/);
-  assert.match(preview, /Preview · Open the full graph to zoom and move/);
+  assert.match(preview, /Preview · Open the full graph to zoom, move, and inspect nodes/);
   assert.match(preview, /Suspicious POST/);
   assert.match(preview, /Graph legend/);
   assert.match(preview, /MITRE technique/);
   assert.match(preview, /markerEnd=|marker-end/);
   assert.match(preview, /attack-graph-arrow/);
+});
+
+test("attack graph grouping collapses repeated alerts without rendering self-links", () => {
+  const graph: CaseAttackGraph = {
+    case_id: "case-group",
+    nodes: [
+      { id: "alert:a1", type: "alert", label: "Repeated rule", timestamp: "2026-09-01T00:00:00Z", rule_level: 5 },
+      { id: "alert:a2", type: "alert", label: "Repeated rule", timestamp: "2026-09-01T00:00:01Z", rule_level: 5 },
+      { id: "host:mail", type: "host", label: "mail", timestamp: null, rule_level: null },
+    ],
+    edges: [
+      { source: "host:mail", target: "alert:a1", relation: "HAS_ALERT" },
+      { source: "host:mail", target: "alert:a2", relation: "HAS_ALERT" },
+      { source: "alert:a1", target: "alert:a2", relation: "PRECEDES" },
+    ],
+    root_cause_alert_id: "a1",
+    chain_order: ["a1", "a2"],
+  };
+
+  const display = createDisplayGraph(graph, true);
+  assert.equal(display.graph.nodes.length, 2);
+  assert.equal(display.graph.edges.length, 1);
+  assert.equal(display.graph.root_cause_alert_id, "alert-group:0");
+  assert.deepEqual(display.groups.get("alert-group:0")?.memberIds, ["alert:a1", "alert:a2"]);
+  assert.equal(display.edgeCounts.get("host:mail|HAS_ALERT|alert-group:0"), 2);
 });
