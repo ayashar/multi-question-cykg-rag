@@ -49,6 +49,11 @@ function getQueryEntries(trace: TurnRecord["trace"]): QueryEntry[] {
   });
 }
 
+function prettyJson(value: unknown): string {
+  const serialized = JSON.stringify(value, null, 2);
+  return serialized ?? String(value);
+}
+
 function eventTimestamp(event: InvestigationProgressEvent): number {
   const timestamp = Date.parse(event.timestamp);
   return Number.isNaN(timestamp) ? Number.MAX_SAFE_INTEGER : timestamp;
@@ -110,19 +115,23 @@ export default function InvestigationActivityLog({
     event.type === "error"
   ));
   const queryEntries = getQueryEntries(trace);
+  const cskgEntries = trace?.cskg ?? [];
 
-  if (!fullLog.length && !queryEntries.length) return null;
+  if (!fullLog.length && !queryEntries.length && !cskgEntries.length) return null;
 
   const agentEvents = fullLog.filter((event) => event.type === "agent" && event.status === "complete");
   const timeline = buildTimeline(fullLog, queryEntries);
   const timelineOrigin = timeline.find((item) => item.timestamp < Number.MAX_SAFE_INTEGER)?.timestamp ?? Number.MAX_SAFE_INTEGER;
-  const simplifiedTimeline = agentEvents.length ? buildTimeline(agentEvents, []) : timeline.filter((item) => item.kind !== "query");
+  const liveCskgEvents = fullLog.filter((event) => event.type === "log" && event.agent === "cskg");
+  const simplifiedTimeline = agentEvents.length
+    ? buildTimeline([...agentEvents, ...liveCskgEvents], [])
+    : timeline.filter((item) => item.kind !== "query");
   const simplifiedOrigin = simplifiedTimeline.find((item) => item.timestamp < Number.MAX_SAFE_INTEGER)?.timestamp ?? Number.MAX_SAFE_INTEGER;
 
   return (
     <details open={defaultOpen} className="mt-3 rounded-[4px] border border-primary-200 bg-background/60">
       <summary className="cursor-pointer px-2.5 py-2 font-b3 font-semibold text-primary-800">
-        Full activity log ({fullLog.length} events{queryEntries.length ? `, ${queryEntries.length} queries` : ""})
+        Full activity log ({fullLog.length} events{queryEntries.length ? `, ${queryEntries.length} queries` : ""}{cskgEntries.length ? `, ${cskgEntries.length} CSKG traces` : ""})
       </summary>
       <div className="border-t border-primary-200 px-2.5 py-2">
         <div className="mb-2 flex flex-wrap gap-2" role="group" aria-label="Activity log display mode">
@@ -170,6 +179,33 @@ export default function InvestigationActivityLog({
               <div aria-label="Database query trace" className="mb-3 border-b border-primary-300 pb-2">
                 <h4 className="font-b3 font-semibold text-primary-900">Database and retrieval queries in timeline</h4>
                 <p className="font-b3 text-primary-800">Raw queries are placed at the retrieval step that produced them.</p>
+              </div>
+            )}
+            {cskgEntries.length > 0 && (
+              <div aria-label="CSKG MCP trace" className="mb-3 border-b border-primary-300 pb-2">
+                <h4 className="font-b3 font-semibold text-primary-900">CSKG / MCP internals</h4>
+                <p className="font-b3 text-primary-800">
+                  Includes server identity, readiness and handshake, registered tools, tool arguments/results, SPARQL requests, and CSKG server stderr.
+                </p>
+                <ol className="mt-2 space-y-3">
+                  {cskgEntries.map((entry, index) => (
+                    <li key={`cskg-${index}`} className="border-l-2 border-amber-400 pl-2">
+                      <h5 className="font-b3 font-semibold text-primary-900">
+                        Retrieval {typeof entry.retrieval_index === "number" ? entry.retrieval_index + 1 : index + 1} · CSKG trace
+                      </h5>
+                      {typeof entry.question === "string" && (
+                        <p className="mt-1 font-mono text-[11px] leading-relaxed text-primary-800 wrap-anywhere">Question: {entry.question}</p>
+                      )}
+                      <p className="mt-1 font-b3 text-primary-700">
+                        {Array.isArray(entry.tool_calls) ? entry.tool_calls.length : 0} tool call(s) · {Array.isArray(entry.server_logs) ? entry.server_logs.length : 0} server log line(s)
+                      </p>
+                      <details className="mt-1 rounded border border-primary-200 bg-background/50 px-2 py-1">
+                        <summary className="cursor-pointer font-b3 font-semibold text-primary-800">See more CSKG details</summary>
+                        <pre className="mt-1 overflow-x-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-primary-800">{prettyJson(entry)}</pre>
+                      </details>
+                    </li>
+                  ))}
+                </ol>
               </div>
             )}
             <ol className="space-y-3" aria-label="Detailed raw response activity timeline events">

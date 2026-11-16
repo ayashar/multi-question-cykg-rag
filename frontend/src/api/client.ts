@@ -58,6 +58,7 @@ export interface InvestigationTrace {
   source_status?: Record<string, unknown> | null;
   dependency_failures?: string[];
   uncertainty?: string[];
+  cskg?: Array<Record<string, unknown>>;
   log?: InvestigationTraceLog[];
   [key: string]: unknown;
 }
@@ -70,7 +71,7 @@ export interface InvestigationTraceLog {
 }
 
 export interface InvestigationServerEvent {
-  type: "turn_started" | "step_completed" | "log" | "turn_completed" | "turn_failed";
+  type: "turn_started" | "step_completed" | "log" | "cskg" | "turn_completed" | "turn_failed";
   ts?: number;
   turn_index?: number;
   question?: string;
@@ -81,6 +82,9 @@ export interface InvestigationServerEvent {
   agent?: string;
   level?: string;
   message?: string;
+  phase?: string;
+  tool?: string;
+  status?: string;
   error?: string | null;
   latency_seconds?: number;
 }

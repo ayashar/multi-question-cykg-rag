@@ -8,6 +8,7 @@ const EVENT_TYPES = [
   "turn_started",
   "step_completed",
   "log",
+  "cskg",
   "turn_completed",
   "turn_failed",
 ] as const;
@@ -107,6 +108,20 @@ function toProgressEvents(event: InvestigationServerEvent): InvestigationProgres
       agent_id: event.agent ? `agent.${event.agent}` : undefined,
       label: event.agent ? STEP_LABELS[event.agent] ?? event.agent : "Investigation agent",
       message: event.message ?? "",
+      level: event.level,
+      timestamp,
+      elapsed_seconds: event.elapsed,
+      source: "backend",
+    }];
+  }
+
+  if (event.type === "cskg") {
+    return [{
+      type: "log",
+      agent: "cskg",
+      agent_id: "agent.cskg",
+      label: "CSKG / MCP",
+      message: event.message ?? "CSKG activity updated.",
       level: event.level,
       timestamp,
       elapsed_seconds: event.elapsed,

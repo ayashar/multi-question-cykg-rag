@@ -70,6 +70,21 @@ def _retrieval(r: dict) -> dict:
     }
 
 
+def _cskg_traces(state: dict) -> List[dict]:
+    """Keep the MCP/CSKG transport trail alongside its retrieval question."""
+    traces = []
+    for retrieval_index, retrieval in enumerate(state.get("question_results") or []):
+        trace = retrieval.get("cskg_trace")
+        if isinstance(trace, dict):
+            traces.append({
+                "retrieval_index": retrieval_index,
+                "question": retrieval.get("question"),
+                "source": retrieval.get("source"),
+                **trace,
+            })
+    return traces
+
+
 def _claims(state: dict) -> List[dict]:
     """Validated claims where grounding ran (they carry the final support
     rating and its source), else the report's own."""
@@ -123,6 +138,7 @@ def build_trace(state: Optional[dict], log: Optional[List[dict]] = None) -> dict
         "source_status": state.get("source_status") or report.get("source_status"),
         "dependency_failures": state.get("dependency_failures") or [],
         "uncertainty": report.get("uncertainty") or [],
+        "cskg": _cskg_traces(state),
         "log": (log or [])[-MAX_LOG_LINES:],
     }
 

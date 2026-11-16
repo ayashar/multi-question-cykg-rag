@@ -47,7 +47,7 @@ class EventBus:
         event = {"ts": time.time(), **event}
         with self._lock:
             history = self._history.setdefault(case_id, [])
-            if event["type"] == "log" and sum(1 for e in history if e["type"] == "log") >= MAX_LOG_LINES:
+            if event["type"] in {"log", "cskg"} and sum(1 for e in history if e["type"] in {"log", "cskg"}) >= MAX_LOG_LINES:
                 subs = list(self._subs.get(case_id, []))   # still live-streamed, just not kept for replay
             else:
                 history.append(event)

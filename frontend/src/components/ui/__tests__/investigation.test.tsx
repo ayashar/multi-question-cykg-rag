@@ -33,6 +33,26 @@ test("live agent events control progress and expose completed logs", () => {
   assert.doesNotMatch(html, /100%|Investigation complete/);
 });
 
+test("activity log keeps raw details out of simplified mode", () => {
+  const html = renderToStaticMarkup(<InvestigationActivityLog
+    events={[{
+      type: "log",
+      agent: "cskg",
+      label: "CSKG / MCP",
+      message: "MCP handshake completed",
+      timestamp: "2026-09-29T00:00:00Z",
+    }]}
+    trace={{
+      cskg: [{ tool_calls: [{ name: "get_technique_mitigations_by_keyword" }], server_logs: [{ message: "SELECT DISTINCT ?techniqueId" }] }],
+      log: [],
+    }}
+  />);
+  assert.match(html, /Detailed raw/);
+  assert.match(html, /MCP handshake completed/);
+  assert.doesNotMatch(html, /get_technique_mitigations_by_keyword/);
+  assert.doesNotMatch(html, /SELECT DISTINCT \?techniqueId/);
+});
+
 test("completed agent logs remain available in the details view", () => {
   const html = renderToStaticMarkup(<InvestigationLog events={[
     { type: "agent", status: "complete", agent: "guardrails", agent_id: "agent.guardrails", label: "Guardrails Agent", messages: ["Decision: relevant"], timestamp: "2026-09-29T00:00:00Z", elapsed_seconds: 0.5 },
@@ -130,6 +150,30 @@ test("chatroom exposes raw retrieval queries in detailed activity mode", () => {
   assert.match(html, /Database and retrieval queries/);
   assert.match(html, /Neo4j Cypher/);
   assert.match(html, /MATCH \(a:Alert\) RETURN a/);
+});
+
+test("chatroom exposes CSKG MCP internals in detailed activity mode", () => {
+  const html = renderToStaticMarkup(<InvestigationActivityLog
+    events={[]}
+    initialMode="detailed"
+    trace={{
+      cskg: [{
+        retrieval_index: 0,
+        question: "Which mitigations apply?",
+        server: { name: "rdf_explorer" },
+        tool_calls: [{ name: "get_technique_mitigations_by_keyword", result: "M1053" }],
+        server_logs: [{ message: "SELECT DISTINCT ?techniqueId" }],
+      }],
+      log: [],
+    }}
+  />);
+  assert.match(html, /CSKG \/ MCP internals/);
+  assert.match(html, /1 tool call\(s\) · 1 server log line\(s\)/);
+  assert.match(html, /See more CSKG details/);
+  assert.match(html, /<details class="mt-1/);
+  assert.doesNotMatch(html, /<details[^>]* open/);
+  assert.match(html, /get_technique_mitigations_by_keyword/);
+  assert.match(html, /SELECT DISTINCT \?techniqueId/);
 });
 
 test("attack graph layout anchors the backend root cause and fans out related nodes", () => {

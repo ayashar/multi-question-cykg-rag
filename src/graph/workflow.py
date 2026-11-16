@@ -90,7 +90,11 @@ from src.agents.review_agent import review_chain
 from src.agents.synthesizer_agent import synthesis_chain, synthesis_chain_fast, SynthesizedReport
 from src.agents.vector_agent import query_vector_search
 from src.agents.cypher_agent import query_cypher
-from src.agents.mcp_rdf_agent import NO_DATA_MARKER as _MCP_NO_DATA_MARKER, run_mcp_agent
+from src.agents.mcp_rdf_agent import (
+    NO_DATA_MARKER as _MCP_NO_DATA_MARKER,
+    get_last_cskg_trace,
+    run_mcp_agent,
+)
 from src.agents.grounding_check import (
     apply_claim_verdicts, apply_self_assessment, case_context_alerts, retry_note as _validation_retry_note,
     summarize_claims, validate_report, validation_adjustments,
@@ -484,14 +488,18 @@ async def dispatch_retrieval_node(state: AgentState):
         the same way again."""
         q_text = gq["question"]
         source = gq["source"]
-        context, failure, started = None, None, time.monotonic()
+        context, failure, started, cskg_trace = None, None, time.monotonic(), None
         max_attempts = 1 if source == "cskg" else _MAX_RETRIEVAL_ATTEMPTS
         for attempt in range(1, max_attempts + 1):
             try:
                 context = await _retrieve_once(source, q_text)
+                if source == "cskg":
+                    cskg_trace = get_last_cskg_trace()
                 failure = None
                 break
             except Exception as e:
+                if source == "cskg":
+                    cskg_trace = get_last_cskg_trace()
                 failure = _describe_failure(source, e, attempt, time.monotonic() - started)
                 # A timed-out worker thread may still be running. Retrying it
                 # here can overlap the same expensive request and amplify load.
@@ -517,7 +525,13 @@ async def dispatch_retrieval_node(state: AgentState):
             # this as a failure -- never as an empty or negative result.
             context = (f"RETRIEVAL FAILED -- the {source} source could not be queried "
                        f"({failure['error_type']}: {failure['message']}). This is NOT a negative result.")
-            return {**gq, "context": context, "retrieval": {"status": "failed", **failure}, "evidence": None}
+            return {
+                **gq,
+                "context": context,
+                "retrieval": {"status": "failed", **failure},
+                "evidence": None,
+                "cskg_trace": cskg_trace,
+            }
         evidence = None
         if isinstance(context, dict) and context.get("scoped"):
             evidence = {
@@ -537,7 +551,7 @@ async def dispatch_retrieval_node(state: AgentState):
                 f"[{evidence['scope_enforcement']}]" + (f" notes={evidence['notes']}" if evidence['notes'] else ""))
             context = context["rendered"]
         dispatch_retrieval_logger.info(f"output: ({source}) {q_text!r} -> {str(context)[:300]!r}")
-        return {**gq, "context": context, "evidence": evidence,
+        return {**gq, "context": context, "evidence": evidence, "cskg_trace": cskg_trace,
                 "retrieval": {"status": "ok", "attempts": attempt, "seconds": round(time.monotonic() - started, 1)}}
 
     results = list(await asyncio.gather(*(run_one(gq) for gq in questions)))

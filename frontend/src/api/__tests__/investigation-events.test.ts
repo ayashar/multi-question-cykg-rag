@@ -79,6 +79,12 @@ test("SSE stream maps backend steps and logs into frontend progress events", asy
     level: "INFO",
     message: "Generated investigation questions.",
   });
+  source.emit("cskg", {
+    type: "cskg",
+    phase: "mcp",
+    message: "MCP handshake completed",
+    level: "INFO",
+  });
 
   assert.equal(events[0].type, "agent");
   assert.equal(events[0].status, "complete");
@@ -87,6 +93,8 @@ test("SSE stream maps backend steps and logs into frontend progress events", asy
   assert.equal(events[1].status, "running");
   assert.equal(events[2].type, "log");
   assert.equal(events[2].message, "Generated investigation questions.");
+  assert.equal(events[3].agent, "cskg");
+  assert.equal(events[3].label, "CSKG / MCP");
   stream.close();
   assert.equal(source.closed, true);
 });

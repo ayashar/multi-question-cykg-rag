@@ -17,10 +17,20 @@ question that triggers it (already wrapped in NODE_CALL_TIMEOUT_SECONDS by
 src/graph/workflow.py's dispatch_retrieval_node), not process startup.
 """
 import asyncio
+import contextvars
+import functools
+import json
 import os
 import logging
+import threading
+import tempfile
 import time
-from src.agents.cskg_health import CskgDependencyError, load_server_config, run_checks_async
+from src.agents.cskg_health import (
+    CskgDependencyError,
+    load_server_config,
+    run_checks_async,
+    server_identity,
+)
 from src.config.settings import llm
 
 logger = logging.getLogger(__name__)
@@ -30,6 +40,206 @@ logger = logging.getLogger(__name__)
 _mcp_client = None
 MCP_MAX_STEPS = max(1, int(os.environ.get("CSKG_MCP_MAX_STEPS", "5")))
 MCP_MAX_RESULT_ROWS = max(1, int(os.environ.get("CSKG_MAX_RESULT_ROWS", "10")))
+CSKG_TRACE_VALUE_CHARS = 12000
+CSKG_TRACE_EVENT_LIMIT = 300
+
+# The MCP server is a child process. Its stderr is therefore not part of the
+# application's Python logging tree. Keep a bounded process-local relay so a
+# completed retrieval can include the server's own startup and SPARQL lines in
+# the investigation trace.
+_server_log_lock = threading.Lock()
+_server_log_buffer: list[dict] = []
+_active_cskg_trace: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "active_cskg_trace", default=None
+)
+_mcp_trace_handler_installed = False
+_session_locks: dict[int, asyncio.Lock] = {}
+
+
+def _clip(value: object, limit: int = CSKG_TRACE_VALUE_CHARS) -> str:
+    if isinstance(value, str):
+        text = value
+    else:
+        try:
+            text = json.dumps(value, ensure_ascii=False, default=str)
+        except Exception:
+            text = repr(value)
+    return text if len(text) <= limit else text[:limit - 3] + "..."
+
+
+def _record_trace_event(source: str, message: str, *, level: str = "INFO", **fields: object) -> None:
+    trace = _active_cskg_trace.get()
+    if trace is None:
+        return
+    event = {
+        "ts": time.time(),
+        "source": source,
+        "level": level,
+        "message": _clip(message),
+    }
+    event.update(fields)
+    events = trace.setdefault("events", [])
+    if len(events) < CSKG_TRACE_EVENT_LIMIT:
+        events.append(event)
+    # Keep the live UI informed without sending raw arguments/results over SSE.
+    try:
+        from src.investigation.events import bus, current_case
+
+        case_id = current_case.get()
+        if case_id:
+            live_event = {
+                "type": "cskg",
+                "phase": source,
+                "message": _clip(message, 240),
+                "level": level,
+            }
+            for field in ("tool", "status"):
+                if field in fields:
+                    live_event[field] = fields[field]
+            bus.publish(case_id, live_event)
+    except Exception:
+        # Live observability must never break a retrieval.
+        pass
+
+
+class _CskgServerLogFile:
+    """File-like stderr sink accepted by asyncio subprocess transports."""
+
+    def __init__(self) -> None:
+        self._file = tempfile.TemporaryFile(mode="w+b")
+        self._read_chars = 0
+        self._lock = threading.Lock()
+
+    def fileno(self) -> int:
+        return self._file.fileno()
+
+    def flush(self) -> None:
+        self._file.flush()
+
+    def capture(self) -> list[dict]:
+        with self._lock:
+            self._file.flush()
+            self._file.seek(0)
+            text = self._file.read().decode("utf-8", errors="replace")
+            new_text = text[self._read_chars:]
+            self._read_chars = len(text)
+        return [{"ts": time.time(), "message": _clip(line.strip())}
+                for line in new_text.splitlines() if line.strip()]
+
+
+_server_log_sinks: list[_CskgServerLogFile] = []
+
+
+def _capture_server_logs() -> None:
+    records = []
+    for sink in list(_server_log_sinks):
+        try:
+            records.extend(sink.capture())
+        except Exception:
+            continue
+    if not records:
+        return
+    with _server_log_lock:
+        _server_log_buffer.extend(records)
+        if len(_server_log_buffer) > CSKG_TRACE_EVENT_LIMIT * 4:
+            del _server_log_buffer[:-CSKG_TRACE_EVENT_LIMIT * 4]
+
+
+class _McpTraceLogHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            _record_trace_event("mcp_use", record.getMessage(), level=record.levelname, logger=record.name)
+        except Exception:
+            # Observability must never break a retrieval.
+            return
+
+
+def _install_mcp_trace_handler() -> None:
+    global _mcp_trace_handler_installed
+    if _mcp_trace_handler_installed:
+        return
+    mcp_logger = logging.getLogger("mcp_use")
+    mcp_logger.addHandler(_McpTraceLogHandler(level=logging.INFO))
+    if mcp_logger.level == logging.NOTSET or mcp_logger.level > logging.INFO:
+        mcp_logger.setLevel(logging.INFO)
+    _mcp_trace_handler_installed = True
+
+
+def _tool_result_text(result: object) -> str:
+    content = getattr(result, "content", None) or []
+    parts = []
+    for item in content:
+        text = getattr(item, "text", None)
+        parts.append(text if text is not None else str(item))
+    return "\n".join(parts) if parts else str(result)
+
+
+def _instrument_connector(connector: object) -> None:
+    if getattr(connector, "_cskg_trace_wrapped", False) or not hasattr(connector, "call_tool"):
+        return
+    original = connector.call_tool
+
+    @functools.wraps(original)
+    async def traced_call(tool_name: str, arguments: dict) -> object:
+        trace = _active_cskg_trace.get()
+        call = {
+            "name": tool_name,
+            "arguments": _clip(arguments),
+            "started_at": time.time(),
+        }
+        if trace is not None:
+            trace.setdefault("tool_calls", []).append(call)
+        try:
+            result = await original(tool_name, arguments)
+        except Exception as exc:
+            call.update({
+                "error": f"{type(exc).__name__}: {exc}",
+                "seconds": round(time.time() - call["started_at"], 3),
+            })
+            _record_trace_event("mcp_tool", f"{tool_name} failed: {type(exc).__name__}: {exc}", level="ERROR")
+            raise
+        call.update({
+            "result": _clip(_tool_result_text(result)),
+            "is_error": bool(getattr(result, "isError", False)),
+            "seconds": round(time.time() - call["started_at"], 3),
+        })
+        _record_trace_event("mcp_tool", f"{tool_name} returned", tool=tool_name)
+        return result
+
+    connector.call_tool = traced_call
+    connector._cskg_trace_wrapped = True
+
+
+async def _ensure_mcp_sessions(client: object) -> list[str]:
+    """Create the shared MCP sessions with a stderr relay before connecting."""
+    loop = asyncio.get_running_loop()
+    lock = _session_locks.setdefault(id(loop), asyncio.Lock())
+    async with lock:
+        sessions = client.get_all_active_sessions()
+        if not sessions:
+            sessions = await client.create_all_sessions(auto_initialize=False)
+            for session in sessions.values():
+                connector = session.connector
+                if hasattr(connector, "errlog"):
+                    sink = _CskgServerLogFile()
+                    connector.errlog = sink
+                    _server_log_sinks.append(sink)
+                await session.initialize()
+            _record_trace_event("mcp", "MCP handshake completed")
+        else:
+            _record_trace_event("mcp", "Reusing existing MCP session")
+        tool_names = []
+        for session in sessions.values():
+            _instrument_connector(session.connector)
+            tool_names.extend(tool.name for tool in await session.connector.list_tools())
+        _record_trace_event("mcp", f"MCP tools discovered: {len(tool_names)}", tools=sorted(tool_names))
+        return tool_names
+
+
+def get_last_cskg_trace() -> dict | None:
+    """Return the trace for the most recent CSKG call in this task."""
+    return _active_cskg_trace.get()
+
 
 def get_mcp_client():
     """Inisialisasi dan mengembalikan MCPClient (hanya sekali).
@@ -171,10 +381,29 @@ async def run_mcp_agent(question: str) -> str:
     through undetected). This is a structural ground-truth signal instead of
     inferring intent from natural language.
     """
-    await ensure_cskg_ready()  # raises CskgDependencyError with the failing stage
+    with _server_log_lock:
+        server_log_start = len(_server_log_buffer)
+    trace = {
+        "question": question,
+        "server": server_identity(),
+        "readiness": None,
+        "events": [],
+        "tool_calls": [],
+        "server_logs": [],
+    }
+    _active_cskg_trace.set(trace)
     try:
+        readiness = await ensure_cskg_ready()  # raises CskgDependencyError with the failing stage
+        trace["readiness"] = readiness
+        _record_trace_event(
+            "readiness",
+            readiness.get("summary", "CSKG readiness completed"),
+            status=readiness.get("status"),
+        )
         client = get_mcp_client()  # imports mcp_use as a side effect -- see module docstring
         from mcp_use import MCPAgent
+        _install_mcp_trace_handler()
+        tool_names = await _ensure_mcp_sessions(client)
         tool_limited = _is_technique_mitigation_question(question)
         disallowed_tools = []
         agent_steps = MCP_MAX_STEPS
@@ -183,11 +412,6 @@ async def run_mcp_agent(question: str) -> str:
             # Discover its registered name first, then hide the other 42
             # options from the agent so it cannot spend its budget on broad
             # searches or text_to_sparql's separate OpenAI API call.
-            if not client.get_all_active_sessions():
-                await client.create_all_sessions()
-            tool_names = []
-            for session in client.get_all_active_sessions().values():
-                tool_names.extend(tool.name for tool in await session.connector.list_tools())
             allowed = "get_technique_mitigations_by_keyword"
             if allowed not in tool_names:
                 raise CskgDependencyError(
@@ -204,6 +428,9 @@ async def run_mcp_agent(question: str) -> str:
         )
         generator = agent.stream(question, track_execution=False)
         result, steps_taken, tools_used_names = await agent._consume_and_return(generator)
+        trace["tools_used"] = tools_used_names
+        trace["steps"] = steps_taken
+        _record_trace_event("agent", f"MCP agent completed in {steps_taken} step(s)", tools_used=tools_used_names)
         # mcp_use returns its current text when max_steps is reached. That
         # text can omit required parts of the answer (for example,
         # mitigations after several broad searches), so it must not be
@@ -224,7 +451,10 @@ async def run_mcp_agent(question: str) -> str:
                 return (f"{NO_DATA_MARKER}: the knowledge-base agent produced an answer without calling "
                         f"any knowledge-graph tool, so that answer was discarded as ungrounded.")
         return result
-    except CskgDependencyError:
+    except CskgDependencyError as exc:
+        trace["error"] = f"{type(exc).__name__}: {exc}"
+        if exc.report is not None:
+            trace["readiness"] = exc.report
         raise
     except Exception as e:
         # Previously returned as an ordinary answer string ("Error during
@@ -234,3 +464,11 @@ async def run_mcp_agent(question: str) -> str:
         logger.error(f"An error occurred while running the MCP Agent: {type(e).__name__}: {e}")
         raise CskgDependencyError(
             f"CSKG agent run failed: {type(e).__name__}: {e or 'no message'}", stage="agent_run") from e
+    finally:
+        trace["server_logs"] = _server_logs_since(server_log_start)
+
+
+def _server_logs_since(start: int) -> list[dict]:
+    _capture_server_logs()
+    with _server_log_lock:
+        return list(_server_log_buffer[start:])
