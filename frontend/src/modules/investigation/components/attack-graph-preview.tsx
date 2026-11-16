@@ -8,9 +8,8 @@ import {
   useState,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
-  type WheelEvent,
 } from "react";
-import { LoaderCircle, Maximize2, Minus, Move, Plus } from "lucide-react";
+import { LoaderCircle, Maximize2, Minus, Move, Plus, RotateCcw, Search, X } from "lucide-react";
 import { getAttackGraph, type AttackGraphNode, type CaseAttackGraph } from "@/api";
 import { Button } from "@/components/ui/button";
 import { ApiErrorView } from "@/components/ui/error-states";
@@ -49,6 +48,118 @@ export interface GraphLayout {
 }
 
 interface ViewportTransform { x: number; y: number; scale: number }
+
+type GraphFilter = AttackGraphNode["type"] | "all";
+
+interface GraphGroupMeta {
+  memberIds: string[];
+  startTime: string | null;
+  endTime: string | null;
+}
+
+interface GraphDisplayModel {
+  graph: CaseAttackGraph;
+  groups: Map<string, GraphGroupMeta>;
+  edgeCounts: Map<string, number>;
+}
+
+function edgeKey(edge: Pick<CaseAttackGraph["edges"][number], "source" | "target" | "relation">) {
+  return `${edge.source}|${edge.relation}|${edge.target}`;
+}
+
+function formatNodeType(type: AttackGraphNode["type"]) {
+  return type.replaceAll("_", " ");
+}
+
+function formatTimeRange(startTime: string | null, endTime: string | null) {
+  if (!startTime) return "No timestamp";
+  if (!endTime || startTime === endTime) return startTime;
+  return `${startTime} → ${endTime}`;
+}
+
+export function createDisplayGraph(graph: CaseAttackGraph, groupAlerts: boolean): GraphDisplayModel {
+  if (!groupAlerts) {
+    return {
+      graph,
+      groups: new Map(),
+      edgeCounts: new Map(graph.edges.map((edge) => [edgeKey(edge), 1])),
+    };
+  }
+
+  const neighborContext = new Map<string, string[]>();
+  for (const node of graph.nodes) neighborContext.set(node.id, []);
+  for (const edge of graph.edges) {
+    if (edge.relation === "PRECEDES") continue;
+    if (neighborContext.has(edge.source)) neighborContext.get(edge.source)?.push(`${edge.relation}:${edge.target}`);
+    if (neighborContext.has(edge.target)) neighborContext.get(edge.target)?.push(`${edge.relation}:${edge.source}`);
+  }
+
+  const alertGroups = new Map<string, AttackGraphNode[]>();
+  for (const node of graph.nodes.filter((item) => item.type === "alert")) {
+    const minute = node.timestamp?.slice(0, 16) ?? "unknown-time";
+    const context = [...(neighborContext.get(node.id) ?? [])].sort().join(",");
+    const key = [node.label, node.rule_level ?? "unknown-level", minute, context].join("|");
+    const group = alertGroups.get(key) ?? [];
+    group.push(node);
+    alertGroups.set(key, group);
+  }
+
+  const nodeToGroup = new Map<string, string>();
+  const groups = new Map<string, GraphGroupMeta>();
+  const groupedNodes: AttackGraphNode[] = [];
+  let groupIndex = 0;
+  for (const members of alertGroups.values()) {
+    if (members.length < 2) {
+      groupedNodes.push(members[0]);
+      continue;
+    }
+    const groupId = `alert-group:${groupIndex}`;
+    groupIndex += 1;
+    const timestamps = members.map((node) => node.timestamp).filter((timestamp): timestamp is string => Boolean(timestamp)).sort();
+    const representative = members[0];
+    groupedNodes.push({ ...representative, id: groupId });
+    groups.set(groupId, {
+      memberIds: members.map((node) => node.id),
+      startTime: timestamps[0] ?? null,
+      endTime: timestamps.at(-1) ?? null,
+    });
+    for (const member of members) nodeToGroup.set(member.id, groupId);
+  }
+
+  for (const node of graph.nodes) {
+    if (node.type !== "alert") groupedNodes.push(node);
+    else if (!nodeToGroup.has(node.id)) nodeToGroup.set(node.id, node.id);
+  }
+
+  const dedupedEdges = new Map<string, CaseAttackGraph["edges"][number]>();
+  const edgeCounts = new Map<string, number>();
+  for (const edge of graph.edges) {
+    const mapped = {
+      ...edge,
+      source: nodeToGroup.get(edge.source) ?? edge.source,
+      target: nodeToGroup.get(edge.target) ?? edge.target,
+    };
+    if (mapped.source === mapped.target) continue;
+    const key = edgeKey(mapped);
+    if (!dedupedEdges.has(key)) dedupedEdges.set(key, mapped);
+    edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
+  }
+
+  const rootCause = graph.root_cause_alert_id
+    ? nodeToGroup.get(`alert:${graph.root_cause_alert_id}`) ?? nodeToGroup.get(graph.root_cause_alert_id) ?? graph.root_cause_alert_id
+    : null;
+
+  return {
+    graph: {
+      ...graph,
+      nodes: groupedNodes,
+      edges: [...dedupedEdges.values()],
+      root_cause_alert_id: rootCause,
+    },
+    groups,
+    edgeCounts,
+  };
+}
 
 function resolveRootNodeId(graph: CaseAttackGraph): string | null {
   if (!graph.root_cause_alert_id) return graph.nodes[0]?.id ?? null;
@@ -133,28 +244,89 @@ export function buildGraphLayout(graph: CaseAttackGraph): GraphLayout {
   return { positions, width, height, rootNodeId };
 }
 
-function GraphNodeCard({ node, rootCause }: { node: AttackGraphNode; rootCause: boolean }) {
+function GraphNodeCard({
+  node,
+  rootCause,
+  groupMeta,
+  selected = false,
+  dimmed = false,
+  dragging = false,
+  onSelect,
+}: {
+  node: AttackGraphNode;
+  rootCause: boolean;
+  groupMeta?: GraphGroupMeta;
+  selected?: boolean;
+  dimmed?: boolean;
+  dragging?: boolean;
+  onSelect?: (nodeId: string) => void;
+}) {
+  const interactive = Boolean(onSelect);
+  const alertCount = groupMeta?.memberIds.length ?? 1;
+
   return (
     <article
-      aria-label={`${node.type.replaceAll("_", " ")} ${node.label}${rootCause ? ", root cause" : ""}`}
+      data-graph-node-id={node.id}
+      aria-label={`${formatNodeType(node.type)} ${node.label}${rootCause ? ", root cause" : ""}${alertCount > 1 ? `, ${alertCount} alerts` : ""}`}
+      aria-pressed={interactive ? selected : undefined}
+      role={interactive ? "button" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onClick={interactive ? () => onSelect?.(node.id) : undefined}
+      onKeyDown={interactive ? (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect?.(node.id);
+        }
+      } : undefined}
       className={cn(
-        "absolute flex flex-col justify-center rounded-[10px] border-3 px-4 py-3 shadow-sm",
+        "absolute flex flex-col justify-center rounded-[10px] border-3 px-4 py-3 shadow-sm outline-none transition-opacity focus-visible:ring-3 focus-visible:ring-primary-300",
         nodeColors[node.type] ?? "border-neutral-400 bg-neutral-100 text-neutral-1000",
         rootCause && "ring-2 ring-red-200 ring-offset-2 ring-offset-[#606060]",
+        selected && "ring-3 ring-primary-300 ring-offset-2 ring-offset-[#606060]",
+        interactive && "cursor-grab",
+        dragging && "cursor-grabbing",
+        dimmed && "opacity-20",
       )}
       style={{ width: NODE_WIDTH, height: NODE_HEIGHT }}
     >
       <div className="flex items-center justify-between gap-3 font-b4 font-medium uppercase tracking-wide opacity-80">
-        <span>{node.type.replaceAll("_", " ")}</span>
+        <span>{formatNodeType(node.type)}</span>
         {rootCause && <span>Root cause</span>}
       </div>
       <p className="mt-2 line-clamp-2 text-lg font-bold leading-tight wrap-anywhere">{node.label}</p>
-      {node.timestamp && <p className="mt-1 truncate font-b3">{node.timestamp}</p>}
+      {groupMeta ? (
+        <p className="mt-1 truncate font-b3">{alertCount} alerts · {formatTimeRange(groupMeta.startTime, groupMeta.endTime)}</p>
+      ) : node.timestamp ? (
+        <p className="mt-1 truncate font-b3">{node.timestamp}</p>
+      ) : null}
     </article>
   );
 }
 
-function GraphPlane({ graph, layout }: { graph: CaseAttackGraph; layout: GraphLayout }) {
+function GraphPlane({
+  graph,
+  layout,
+  positions = layout.positions,
+  groups = new Map(),
+  edgeCounts = new Map(),
+  selectedNodeId = null,
+  activeNodeIds,
+  draggingNodeId = null,
+  onSelectNode,
+}: {
+  graph: CaseAttackGraph;
+  layout: GraphLayout;
+  positions?: Map<string, Position>;
+  groups?: Map<string, GraphGroupMeta>;
+  edgeCounts?: Map<string, number>;
+  selectedNodeId?: string | null;
+  activeNodeIds?: Set<string>;
+  draggingNodeId?: string | null;
+  onSelectNode?: (nodeId: string) => void;
+}) {
+  const hasSelection = Boolean(selectedNodeId);
+  const showAllLabels = graph.edges.length <= 24 && !hasSelection;
+
   return (
     <div className="absolute left-0 top-0 origin-top-left will-change-transform" style={{ width: layout.width, height: layout.height }}>
       <svg aria-hidden="true" className="absolute inset-0 overflow-visible" width={layout.width} height={layout.height}>
@@ -164,8 +336,8 @@ function GraphPlane({ graph, layout }: { graph: CaseAttackGraph; layout: GraphLa
           </marker>
         </defs>
         {graph.edges.map((edge, index) => {
-          const source = layout.positions.get(edge.source);
-          const target = layout.positions.get(edge.target);
+          const source = positions.get(edge.source);
+          const target = positions.get(edge.target);
           if (!source || !target) return null;
           const sourceIsLeft = source.x <= target.x;
           const x1 = sourceIsLeft ? source.x + NODE_WIDTH : source.x;
@@ -176,20 +348,38 @@ function GraphPlane({ graph, layout }: { graph: CaseAttackGraph; layout: GraphLa
           const path = `M ${x1} ${y1} C ${x1 + (sourceIsLeft ? controlOffset : -controlOffset)} ${y1}, ${x2 + (sourceIsLeft ? -controlOffset : controlOffset)} ${y2}, ${x2} ${y2}`;
           const labelX = (x1 + x2) / 2;
           const labelY = (y1 + y2) / 2;
-          const labelWidth = Math.max(78, edge.relation.length * 8 + 24);
+          const connectedToSelection = !selectedNodeId || edge.source === selectedNodeId || edge.target === selectedNodeId;
+          const edgeIsActive = !activeNodeIds || (activeNodeIds.has(edge.source) && activeNodeIds.has(edge.target));
+          const edgeOpacity = connectedToSelection && edgeIsActive ? 1 : 0.18;
+          const count = edgeCounts.get(edgeKey(edge)) ?? 1;
+          const relationLabel = `${edge.relation.replaceAll("_", " ")}${count > 1 ? ` ×${count}` : ""}`;
+          const labelWidth = Math.max(78, relationLabel.length * 8 + 24);
+          const showLabel = (showAllLabels || connectedToSelection) && edgeIsActive;
           return (
-            <g key={`${edge.source}-${edge.relation}-${edge.target}-${index}`}>
-              <path d={path} fill="none" stroke="#111111" strokeWidth="3" markerEnd="url(#attack-graph-arrow)" />
-              <rect x={labelX - labelWidth / 2} y={labelY - 14} width={labelWidth} height="28" rx="10" fill="#fdfdfd" stroke="#111111" strokeWidth="2" />
-              <text x={labelX} y={labelY + 4} textAnchor="middle" fill="#333333" fontSize="11" fontWeight="600" letterSpacing="1.1">{edge.relation.replaceAll("_", " ")}</text>
+            <g key={`${edge.source}-${edge.relation}-${edge.target}-${index}`} opacity={edgeOpacity}>
+              <path d={path} fill="none" stroke="#111111" strokeWidth={connectedToSelection ? "3" : "2"} markerEnd="url(#attack-graph-arrow)" />
+              {showLabel && <>
+                <rect x={labelX - labelWidth / 2} y={labelY - 14} width={labelWidth} height="28" rx="10" fill="#fdfdfd" stroke="#111111" strokeWidth="2" />
+                <text x={labelX} y={labelY + 4} textAnchor="middle" fill="#333333" fontSize="11" fontWeight="600" letterSpacing="1.1">{relationLabel}</text>
+              </>}
             </g>
           );
         })}
       </svg>
       {graph.nodes.map((node) => {
-        const position = layout.positions.get(node.id);
+        const position = positions.get(node.id);
         if (!position) return null;
-        return <div key={node.id} style={{ position: "absolute", left: position.x, top: position.y }}><GraphNodeCard node={node} rootCause={node.id === layout.rootNodeId} /></div>;
+        return <div key={node.id} style={{ position: "absolute", left: position.x, top: position.y }}>
+          <GraphNodeCard
+            node={node}
+            rootCause={node.id === layout.rootNodeId}
+            groupMeta={groups.get(node.id)}
+            selected={node.id === selectedNodeId}
+            dimmed={Boolean(activeNodeIds && !activeNodeIds.has(node.id))}
+            dragging={node.id === draggingNodeId}
+            onSelect={onSelectNode}
+          />
+        </div>;
       })}
     </div>
   );
@@ -222,10 +412,59 @@ function GraphLegend() {
   );
 }
 
+function GraphDetailPanel({
+  graph,
+  selectedNodeId,
+  groups,
+  edgeCounts,
+  onClose,
+}: {
+  graph: CaseAttackGraph;
+  selectedNodeId: string;
+  groups: Map<string, GraphGroupMeta>;
+  edgeCounts: Map<string, number>;
+  onClose: () => void;
+}) {
+  const node = graph.nodes.find((item) => item.id === selectedNodeId);
+  if (!node) return null;
+  const group = groups.get(node.id);
+  const relationships = graph.edges.filter((edge) => edge.source === node.id || edge.target === node.id);
+
+  return (
+    <aside aria-label="Selected graph node details" className="rounded-[4px] border border-primary-300 bg-primary-100 p-4 text-primary-1000">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-b4 font-semibold uppercase tracking-wide text-primary-700">Selected {formatNodeType(node.type)}</p>
+          <h3 className="mt-1 font-h7 font-bold wrap-anywhere">{node.label}</h3>
+        </div>
+        <Button type="button" size="icon" variant="secondary" aria-label="Close selected node details" title="Close details" onClick={onClose}>
+          <X aria-hidden="true" className="size-4" />
+        </Button>
+      </div>
+      <dl className="mt-3 grid gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
+        <div><dt className="font-semibold text-primary-700">Node ID</dt><dd className="break-all font-mono">{node.id}</dd></div>
+        <div><dt className="font-semibold text-primary-700">Severity</dt><dd>{node.rule_level ?? "Not available"}</dd></div>
+        <div className="sm:col-span-2"><dt className="font-semibold text-primary-700">Timestamp</dt><dd>{group ? `${group.memberIds.length} alerts · ${formatTimeRange(group.startTime, group.endTime)}` : node.timestamp ?? "Not available"}</dd></div>
+      </dl>
+      {group && <div className="mt-3 rounded-[3px] bg-background/70 p-3 text-sm"><p className="font-semibold">Grouped alert IDs</p><p className="mt-1 break-all font-mono">{group.memberIds.slice(0, 8).join(", ")}{group.memberIds.length > 8 ? ` … +${group.memberIds.length - 8} more` : ""}</p></div>}
+      <div className="mt-3">
+        <p className="font-semibold">Relationships ({relationships.length})</p>
+        <ul className="mt-1 space-y-1 text-sm">
+          {relationships.slice(0, 8).map((edge) => <li key={edgeKey(edge)}>{edge.relation.replaceAll("_", " ")} {edgeCounts.get(edgeKey(edge)) && (edgeCounts.get(edgeKey(edge)) ?? 1) > 1 ? `×${edgeCounts.get(edgeKey(edge))}` : ""}</li>)}
+          {relationships.length > 8 && <li>… {relationships.length - 8} more relationships</li>}
+        </ul>
+      </div>
+    </aside>
+  );
+}
+
 export function MiniAttackGraph({ graph }: { graph: CaseAttackGraph }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const planeRef = useRef<HTMLDivElement>(null);
-  const layout = useMemo(() => buildGraphLayout(graph), [graph]);
+  const displayModel = useMemo(() => createDisplayGraph(graph, true), [graph]);
+  const displayGraph = displayModel.graph;
+  const layout = useMemo(() => buildGraphLayout(displayGraph), [displayGraph]);
+  const rootNode = displayGraph.nodes.find((node) => node.id === layout.rootNodeId);
 
   const positionPreview = useCallback(() => {
     const viewport = viewportRef.current;
@@ -250,6 +489,10 @@ export function MiniAttackGraph({ graph }: { graph: CaseAttackGraph }) {
 
   return (
     <div className="space-y-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 font-b3 text-neutral-800">
+        <p><span className="font-semibold">Root cause:</span> {rootNode?.label ?? "Not available"}</p>
+        <p>{graph.nodes.length} nodes · {graph.edges.length} relationships</p>
+      </div>
       <div
         ref={viewportRef}
         role="img"
@@ -257,10 +500,10 @@ export function MiniAttackGraph({ graph }: { graph: CaseAttackGraph }) {
         className="relative h-[260px] w-full overflow-hidden rounded-[3px] bg-[#606060]"
       >
         <div ref={planeRef} className="pointer-events-none absolute left-0 top-0 origin-top-left" style={{ width: layout.width, height: layout.height }}>
-          <GraphPlane graph={graph} layout={layout} />
+          <GraphPlane graph={displayGraph} layout={layout} groups={displayModel.groups} edgeCounts={displayModel.edgeCounts} />
         </div>
         <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black-600/75 to-transparent px-3 pb-3 pt-10 text-white">
-          <p className="font-b3">Preview · Open the full graph to zoom and move</p>
+          <p className="font-b3">Preview · Open the full graph to zoom, move, and inspect nodes</p>
         </div>
       </div>
       <GraphLegend />
@@ -268,12 +511,45 @@ export function MiniAttackGraph({ graph }: { graph: CaseAttackGraph }) {
   );
 }
 
+interface GraphDragState {
+  pointerId: number;
+  mode: "idle" | "canvas" | "node";
+  nodeId: string | null;
+  x: number;
+  y: number;
+  originX: number;
+  originY: number;
+}
+
 function InteractiveAttackGraph({ graph }: { graph: CaseAttackGraph }) {
   const viewportRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef({ pointerId: -1, x: 0, y: 0, originX: 0, originY: 0 });
-  const layout = useMemo(() => buildGraphLayout(graph), [graph]);
+  const dragRef = useRef<GraphDragState>({ pointerId: -1, mode: "idle", nodeId: null, x: 0, y: 0, originX: 0, originY: 0 });
+  const [groupAlerts, setGroupAlerts] = useState(true);
+  const displayModel = useMemo(() => createDisplayGraph(graph, groupAlerts), [graph, groupAlerts]);
+  const displayGraph = displayModel.graph;
+  const layout = useMemo(() => buildGraphLayout(displayGraph), [displayGraph]);
+  const [nodePositions, setNodePositions] = useState<Map<string, Position>>(() => new Map(layout.positions));
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState<GraphFilter>("all");
+  const [focusMode, setFocusMode] = useState(false);
   const [transform, setTransform] = useState<ViewportTransform>({ x: 24, y: 24, scale: 1 });
-  const [dragging, setDragging] = useState(false);
+  const transformRef = useRef(transform);
+  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
+  const [draggingCanvas, setDraggingCanvas] = useState(false);
+
+  useEffect(() => {
+    transformRef.current = transform;
+  }, [transform]);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      setNodePositions(new Map(layout.positions));
+      setSelectedNodeId(null);
+      setFocusMode(false);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [layout]);
 
   const fitGraph = useCallback(() => {
     const viewport = viewportRef.current;
@@ -308,59 +584,185 @@ function InteractiveAttackGraph({ graph }: { graph: CaseAttackGraph }) {
     });
   }, []);
 
-  const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
+  const nodeMatches = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return new Set(displayGraph.nodes.filter((node) => {
+      const groupText = displayModel.groups.get(node.id)?.memberIds.join(" ") ?? "";
+      const searchable = `${node.id} ${node.label} ${groupText}`.toLowerCase();
+      return (typeFilter === "all" || node.type === typeFilter) && (!normalizedQuery || searchable.includes(normalizedQuery));
+    }).map((node) => node.id));
+  }, [displayGraph.nodes, displayModel.groups, query, typeFilter]);
+
+  const focusNodeIds = useMemo(() => {
+    if (!focusMode) return null;
+    const anchor = selectedNodeId ?? layout.rootNodeId;
+    if (!anchor) return new Set<string>();
+    const ids = new Set([anchor]);
+    for (const edge of displayGraph.edges) {
+      if (edge.source === anchor) ids.add(edge.target);
+      if (edge.target === anchor) ids.add(edge.source);
+    }
+    return ids;
+  }, [displayGraph.edges, focusMode, layout.rootNodeId, selectedNodeId]);
+
+  const activeNodeIds = useMemo(() => {
+    if (!focusNodeIds) return nodeMatches;
+    return new Set([...nodeMatches].filter((nodeId) => focusNodeIds.has(nodeId)));
+  }, [focusNodeIds, nodeMatches]);
+
+  const selectedNode = selectedNodeId ? displayGraph.nodes.find((node) => node.id === selectedNodeId) : null;
+  const handleNativeWheel = useCallback((event: globalThis.WheelEvent) => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.closest("button")) return;
+    const viewport = viewportRef.current;
+    if (!viewport) return;
     event.preventDefault();
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const factor = event.deltaY > 0 ? 0.9 : 1.1;
-    zoomAt(transform.scale * factor, event.clientX - bounds.left, event.clientY - bounds.top);
-  };
+    event.stopPropagation();
+    const bounds = viewport.getBoundingClientRect();
+    const sensitivity = event.ctrlKey ? 0.01 : 0.0025;
+    const factor = Math.exp(-event.deltaY * sensitivity);
+    zoomAt(transformRef.current.scale * factor, event.clientX - bounds.left, event.clientY - bounds.top);
+  }, [zoomAt]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    viewport.addEventListener("wheel", handleNativeWheel, { passive: false });
+    return () => viewport.removeEventListener("wheel", handleNativeWheel);
+  }, [handleNativeWheel]);
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if ((event.target as HTMLElement).closest("button")) return;
+    const target = event.target as HTMLElement;
+    if (target.closest("button,input,select")) return;
+    const nodeId = target.closest("[data-graph-node-id]")?.getAttribute("data-graph-node-id") ?? null;
     event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, originX: transform.x, originY: transform.y };
-    setDragging(true);
+    if (nodeId) {
+      const position = nodePositions.get(nodeId) ?? layout.positions.get(nodeId);
+      if (!position) return;
+      dragRef.current = { pointerId: event.pointerId, mode: "node", nodeId, x: event.clientX, y: event.clientY, originX: position.x, originY: position.y };
+      setSelectedNodeId(nodeId);
+      setDraggingNodeId(nodeId);
+      return;
+    }
+    dragRef.current = { pointerId: event.pointerId, mode: "canvas", nodeId: null, x: event.clientX, y: event.clientY, originX: transform.x, originY: transform.y };
+    setDraggingCanvas(true);
   };
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (dragRef.current.pointerId !== event.pointerId) return;
-    setTransform((current) => ({
-      ...current,
-      x: dragRef.current.originX + event.clientX - dragRef.current.x,
-      y: dragRef.current.originY + event.clientY - dragRef.current.y,
-    }));
+    const drag = dragRef.current;
+    if (drag.pointerId !== event.pointerId) return;
+    if (drag.mode === "node" && drag.nodeId) {
+      const rawX = drag.originX + (event.clientX - drag.x) / transform.scale;
+      const rawY = drag.originY + (event.clientY - drag.y) / transform.scale;
+      const columnXs = [...new Set([...layout.positions.values()].map((position) => position.x))];
+      const snappedX = columnXs.reduce((closest, x) => Math.abs(x - rawX) < Math.abs(closest - rawX) ? x : closest, columnXs[0] ?? rawX);
+      const nextY = Math.max(PLANE_PADDING, Math.min(layout.height - NODE_HEIGHT - PLANE_PADDING, rawY));
+      setNodePositions((current) => new Map(current).set(drag.nodeId!, { x: snappedX, y: nextY }));
+      return;
+    }
+    if (drag.mode === "canvas") {
+      setTransform((current) => ({
+        ...current,
+        x: drag.originX + event.clientX - drag.x,
+        y: drag.originY + event.clientY - drag.y,
+      }));
+    }
   };
 
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (dragRef.current.pointerId !== event.pointerId) return;
-    dragRef.current.pointerId = -1;
-    setDragging(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    dragRef.current = { pointerId: -1, mode: "idle", nodeId: null, x: 0, y: 0, originX: 0, originY: 0 };
+    setDraggingNodeId(null);
+    setDraggingCanvas(false);
+  };
+
+  const moveSelectedNode = (dx: number, dy: number) => {
+    if (!selectedNodeId) return;
+    setNodePositions((current) => {
+      const position = current.get(selectedNodeId) ?? layout.positions.get(selectedNodeId);
+      if (!position) return current;
+      const next = {
+        x: Math.max(PLANE_PADDING, Math.min(layout.width - NODE_WIDTH - PLANE_PADDING, position.x + dx)),
+        y: Math.max(PLANE_PADDING, Math.min(layout.height - NODE_HEIGHT - PLANE_PADDING, position.y + dy)),
+      };
+      return new Map(current).set(selectedNodeId, next);
+    });
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const movement = event.shiftKey ? 80 : 32;
-    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "+", "=", "-", "0"].includes(event.key)) event.preventDefault();
-    if (event.key === "ArrowLeft") setTransform((value) => ({ ...value, x: value.x + movement }));
-    if (event.key === "ArrowRight") setTransform((value) => ({ ...value, x: value.x - movement }));
-    if (event.key === "ArrowUp") setTransform((value) => ({ ...value, y: value.y + movement }));
-    if (event.key === "ArrowDown") setTransform((value) => ({ ...value, y: value.y - movement }));
-    if (event.key === "+" || event.key === "=") zoomAt(transform.scale * 1.15);
-    if (event.key === "-") zoomAt(transform.scale / 1.15);
-    if (event.key === "0") fitGraph();
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "+", "=", "-", "0", "Escape"].includes(event.key)) event.preventDefault();
+    if (event.key === "Escape") {
+      setSelectedNodeId(null);
+      setFocusMode(false);
+    } else if (event.key === "ArrowLeft") {
+      if (selectedNodeId) moveSelectedNode(-movement, 0);
+      else setTransform((value) => ({ ...value, x: value.x + movement }));
+    } else if (event.key === "ArrowRight") {
+      if (selectedNodeId) moveSelectedNode(movement, 0);
+      else setTransform((value) => ({ ...value, x: value.x - movement }));
+    } else if (event.key === "ArrowUp") {
+      if (selectedNodeId) moveSelectedNode(0, -movement);
+      else setTransform((value) => ({ ...value, y: value.y + movement }));
+    } else if (event.key === "ArrowDown") {
+      if (selectedNodeId) moveSelectedNode(0, movement);
+      else setTransform((value) => ({ ...value, y: value.y - movement }));
+    }
+    else if (event.key === "+" || event.key === "=") zoomAt(transform.scale * 1.15);
+    else if (event.key === "-") zoomAt(transform.scale / 1.15);
+    else if (event.key === "0") fitGraph();
+  };
+
+  const resetLayout = () => {
+    setNodePositions(new Map(layout.positions));
+    setSelectedNodeId(null);
+    setFocusMode(false);
+    fitGraph();
   };
 
   return (
     <div className="space-y-3">
+      <div className="space-y-3 rounded-[4px] border border-neutral-300 bg-background p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="relative min-w-52 flex-1">
+            <Search aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-neutral-700" />
+            <span className="sr-only">Search graph</span>
+            <input aria-label="Search graph" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search alert, host, IP, or technique" className="w-full rounded-[3px] border border-neutral-300 bg-background py-2 pl-9 pr-3 font-b3 text-neutral-1000 outline-none focus-visible:ring-3 focus-visible:ring-primary-300" />
+          </label>
+          <label>
+            <span className="sr-only">Filter graph by node type</span>
+            <select aria-label="Filter graph by node type" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as GraphFilter)} className="rounded-[3px] border border-neutral-300 bg-background px-3 py-2 font-b3 text-neutral-1000 outline-none focus-visible:ring-3 focus-visible:ring-primary-300">
+              <option value="all">All node types</option>
+              <option value="alert">Alerts</option>
+              <option value="host">Hosts</option>
+              <option value="ip">IP addresses</option>
+              <option value="user">Users</option>
+              <option value="mitre_technique">MITRE techniques</option>
+            </select>
+          </label>
+          <Button type="button" variant={groupAlerts ? "primary" : "secondary"} aria-pressed={groupAlerts} onClick={() => setGroupAlerts((value) => !value)}>
+            {groupAlerts ? "Grouped alerts" : "Individual alerts"}
+          </Button>
+          <Button type="button" variant="secondary" disabled={!selectedNodeId && !layout.rootNodeId} onClick={() => { if (!selectedNodeId) setSelectedNodeId(layout.rootNodeId); setFocusMode(true); }}>
+            Focus {selectedNodeId ? "selection" : "root"}
+          </Button>
+          <Button type="button" variant="secondary" onClick={resetLayout}>
+            <RotateCcw aria-hidden="true" className="size-4" />Reset layout
+          </Button>
+        </div>
+        <p role="status" className="font-b3 text-neutral-800">Showing {activeNodeIds.size} of {displayGraph.nodes.length} visible nodes · {groupAlerts ? "repeated alerts are grouped" : "individual alerts are shown"}</p>
+      </div>
+
       <div
         ref={viewportRef}
         role="application"
         tabIndex={0}
-        aria-label="Interactive attack graph. Drag to move, use the mouse wheel or plus and minus buttons to zoom, and use Fit graph to reset the view."
+        aria-label="Interactive attack graph. Drag nodes to reposition them, drag empty space to pan, use the mouse wheel, trackpad pinch, or plus and minus buttons to zoom, and use Fit graph or Reset layout to restore the view."
         className={cn(
-          "relative h-[520px] w-full touch-none overflow-hidden rounded-[3px] bg-[#606060] outline-none ring-primary-300 focus-visible:ring-3 md:h-[620px]",
-          dragging ? "cursor-grabbing" : "cursor-grab",
+          "relative h-[520px] w-full touch-none overscroll-contain overflow-hidden rounded-[3px] bg-[#606060] outline-none ring-primary-300 focus-visible:ring-3 md:h-[620px]",
+          draggingNodeId || draggingCanvas ? "cursor-grabbing" : "cursor-grab",
         )}
-        onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={endDrag}
@@ -384,16 +786,18 @@ function InteractiveAttackGraph({ graph }: { graph: CaseAttackGraph }) {
           className="absolute left-0 top-0 origin-top-left will-change-transform"
           style={{ width: layout.width, height: layout.height, transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})` }}
         >
-          <GraphPlane graph={graph} layout={layout} />
+          <GraphPlane graph={displayGraph} layout={layout} positions={nodePositions} groups={displayModel.groups} edgeCounts={displayModel.edgeCounts} selectedNodeId={selectedNodeId} activeNodeIds={activeNodeIds} draggingNodeId={draggingNodeId} onSelectNode={setSelectedNodeId} />
         </div>
 
         <div className="pointer-events-none absolute bottom-3 left-3 z-20 flex items-center gap-2 rounded-[4px] bg-black-600/70 px-3 py-2 text-white">
           <Move aria-hidden="true" className="size-4" />
-          <span className="font-b3">Drag to move · Scroll to zoom</span>
+          <span className="font-b3">Drag node to reposition · Drag empty space to pan · Wheel or trackpad pinch to zoom</span>
         </div>
       </div>
+
+      {selectedNode && <GraphDetailPanel graph={displayGraph} selectedNodeId={selectedNode.id} groups={displayModel.groups} edgeCounts={displayModel.edgeCounts} onClose={() => setSelectedNodeId(null)} />}
       <GraphLegend />
-      <p className="font-b3 text-neutral-800">Keyboard: arrow keys move the graph, +/− zoom, and 0 fits all nodes.</p>
+      <p className="font-b3 text-neutral-800">Keyboard: select a node, then arrow keys move it; without a selection they pan the graph. Press +/− to zoom, 0 to fit, and Escape to clear selection.</p>
     </div>
   );
 }
