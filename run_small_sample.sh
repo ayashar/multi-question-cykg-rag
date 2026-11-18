@@ -21,7 +21,7 @@
 # get fully investigated. Set ENABLE_LLM_TRIAGE=false before running this
 # to skip that and test the deterministic-only gate instead.
 #
-# Needs OPENAI_API_KEY + NEO4J_AURA* already set in multi-agents-cykg-rag/.env
+# Needs the configured LLM provider credential + NEO4J_AURA* already set in multi-agents-cykg-rag/.env
 # -- this writes real alerts into your live Neo4j graph and makes real LLM
 # calls, same as run_live.py normally does. Runs in your own terminal so you
 # can watch it live / Ctrl+C it yourself.

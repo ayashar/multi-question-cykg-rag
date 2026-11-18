@@ -194,6 +194,37 @@ def _load_case(key: str, expected_case_id: str) -> Optional[Case]:
     return case if case.case_id == expected_case_id else None
 
 
+def find_saved_case(case_id: str) -> Optional[Case]:
+    """Return a durable case snapshot when reclustering cannot find it.
+
+    Case ids are derived from the exact alert set used when an investigation
+    started. Re-running clustering later with a wall-clock lookback can miss
+    that set, especially for replayed historical data. The case snapshot is
+    already written alongside the investigation checkpoint, so it is the
+    stable source of truth for reopening an investigated case.
+
+    Owner-scoped thread ids are hashed in checkpoint filenames. That is why
+    this helper checks the direct case-id path first and then scans the small
+    collection of persisted ``*.case.json`` snapshots.
+    """
+    if not case_id or not CHECKPOINT_DIR.exists():
+        return None
+
+    direct = _case_path(case_id)
+    candidates = [direct] if direct.exists() else []
+    candidates.extend(path for path in CHECKPOINT_DIR.glob("*.case.json") if path != direct)
+
+    for path in candidates:
+        try:
+            case = Case.model_validate_json(path.read_text())
+        except Exception:
+            logger.warning("[investigation] could not read saved case snapshot %s", path, exc_info=True)
+            continue
+        if case.case_id == case_id:
+            return case
+    return None
+
+
 def _persist_state(key: str) -> None:
     """Save the case's latest pipeline state so the conversation can be
     resumed after a restart. A failure here never fails the turn itself."""

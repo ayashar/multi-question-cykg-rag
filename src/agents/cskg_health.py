@@ -118,7 +118,21 @@ def load_server_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
         # environment rather than inheriting the full parent environment.
         # In particular, without CSKG_MAX_RESULT_ROWS the server silently
         # falls back to 25 rows even though the evaluator is configured for 10.
-        for key in ('PROPOSAL_TELEMETRY_PATH', 'PROPOSAL_CSKG_CACHE', 'CSKG_MAX_RESULT_ROWS'):
+        model_env_keys = [
+            'PROPOSAL_TELEMETRY_PATH',
+            'PROPOSAL_CSKG_CACHE',
+            'CSKG_MAX_RESULT_ROWS',
+            'LLM_PROVIDER',
+            'LLM_MODEL_NAME',
+        ]
+        credential_key = {
+            'openrouter': 'OPENROUTER_API_KEY',
+            'openai': 'OPENAI_API_KEY',
+            'deepseek': 'DEEPSEEK_API_KEY',
+        }.get(os.environ.get('LLM_PROVIDER', 'openrouter').strip().lower())
+        if credential_key:
+            model_env_keys.append(credential_key)
+        for key in model_env_keys:
             if os.environ.get(key):
                 spec.setdefault('env', {})[key] = os.environ[key]
     return config

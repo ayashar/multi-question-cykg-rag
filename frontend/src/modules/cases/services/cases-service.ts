@@ -119,10 +119,16 @@ export function isManualInvestigatedCase(caseId: string): boolean {
   );
 }
 
+// A small margin prevents an "All" window from becoming stale because the
+// browser and backend evaluate Date.now() a little later or on different
+// clocks. Investigated cases are additionally protected by the backend's
+// durable case snapshot fallback.
+export const LOOKBACK_SAFETY_MARGIN_HOURS = 72;
+
 export function hoursCoveringTimestamp(timestamp: string, now = Date.now()): number {
   const earliest = Date.parse(timestamp);
   if (Number.isNaN(earliest)) throw new Error("Ingestion status returned an invalid earliest timestamp.");
-  return Math.max(24, Math.ceil((now - earliest) / 3_600_000) + 1);
+  return Math.max(24, Math.ceil((now - earliest) / 3_600_000) + LOOKBACK_SAFETY_MARGIN_HOURS);
 }
 
 export async function resolveLookbackHours(preset: LookbackPreset): Promise<number> {

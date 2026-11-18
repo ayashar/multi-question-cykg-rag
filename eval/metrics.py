@@ -222,4 +222,4 @@ if __name__ == "__main__":
         {"confidence": "low", "correct": True},
     ])
     print("calibration:", calib)
-    print("OK: metrics sanity checks passed (score_llm_judge needs live OPENAI_API_KEY, not covered here)")
+    print("OK: metrics sanity checks passed (score_llm_judge needs the configured live LLM credential, not covered here)")

@@ -6,7 +6,7 @@
 # also score each alert with the LLM-as-a-Judge rubric (slower/costlier: one
 # extra LLM call per alert).
 #
-# Needs OPENAI_API_KEY + NEO4J_AURA* already set in multi-agents-cykg-rag/.env.
+# Needs the configured LLM provider credential + NEO4J_AURA* already set in multi-agents-cykg-rag/.env.
 # Expect on the order of 30-45 min for the full sample through the multi-agent
 # pipeline. Runs in your own terminal so you can watch it live / Ctrl+C it
 # yourself.

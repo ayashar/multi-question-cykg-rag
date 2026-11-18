@@ -14,7 +14,7 @@ loading -- adapted for two AIT-ADS-specific realities:
     (labels.csv), not a native per-alert field -- already baked into
     alerts_ground_truth.json by ait_ads.py, nothing extra needed here.
 
-Needs real OPENAI_API_KEY / NEO4J_AURA* credentials.
+Needs the configured LLM provider credential / NEO4J_AURA* credentials.
 
 Usage:
     uv run -m eval.run_eval

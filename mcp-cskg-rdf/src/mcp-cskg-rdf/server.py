@@ -20,8 +20,8 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
 # This subprocess is launched (via browser_mcp.json) using the main
-# project's own .venv, so it normally inherits OPENAI_API_KEY from the
-# parent process's already-loaded environment (src/config/settings.py's
+# project's own .venv, so it normally inherits the configured LLM provider
+# and credential from the parent process (src/config/settings.py's
 # load_dotenv() runs before this subprocess is ever spawned). Loaded here
 # too, defensively, so this script also works standalone (e.g. run
 # directly for testing) without depending on that inheritance.
@@ -431,7 +431,7 @@ def execute_sparql_query(query: str, ctx: Context, include_description: bool = F
         results = graph.query(bounded_query)
         ctx.request_context.lifespan_context["metrics"]["queries"] += 1
         ctx.request_context.lifespan_context["metrics"]["total_time"] += time.time() - start_time
-        logger.info(bounded_query)
+        logger.info("[SPARQL query]\n%s", bounded_query)
         return format_sparql_results(results, include_description)
     except Exception as e:
         logger.error(f"SPARQL query error: {_describe_error(e)}")
@@ -1631,6 +1631,57 @@ Rules, matching this knowledge base's own conventions:
 """
 
 
+_LLM_PROVIDER_CONFIG = {
+    "openrouter": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_key": "OPENROUTER_API_KEY",
+        "default_model": "openai/gpt-5-mini",
+    },
+    "openai": {
+        "base_url": "https://api.openai.com/v1",
+        "api_key": "OPENAI_API_KEY",
+        "default_model": "gpt-5-mini",
+    },
+    "deepseek": {
+        "base_url": "https://api.deepseek.com/beta",
+        "api_key": "DEEPSEEK_API_KEY",
+        "default_model": "deepseek-flash",
+    },
+}
+
+
+def _configured_llm() -> Optional[tuple[OpenAI, str, str]]:
+    """Build the OpenAI-compatible client used by the SPARQL fallback.
+
+    The main application routes all model calls through ``src.config.models``.
+    This MCP server is a separate subprocess, so it needs the same small
+    provider mapping locally instead of silently falling back to OpenAI.
+    """
+    provider = os.environ.get("LLM_PROVIDER", "openrouter").strip().lower()
+    config = _LLM_PROVIDER_CONFIG.get(provider)
+    if config is None:
+        logger.error("[text_to_sparql] unsupported LLM_PROVIDER=%r", provider)
+        return None
+
+    api_key = os.environ.get(config["api_key"], "").strip()
+    if not api_key:
+        logger.error("[text_to_sparql] %s not set -- cannot generate a query", config["api_key"])
+        return None
+
+    model = os.environ.get("LLM_MODEL_NAME", config["default_model"]).strip()
+    if provider == "openrouter" and "/" not in model:
+        logger.error("[text_to_sparql] OpenRouter model must be a provider/model ID, got %r", model)
+        return None
+
+    client_kwargs = {
+        "api_key": api_key,
+        "base_url": config["base_url"],
+        "max_retries": 0,
+        "timeout": 45,
+    }
+    return OpenAI(**client_kwargs), model, provider
+
+
 def _generate_sparql(question: str) -> Optional[str]:
     """One-shot LLM call translating a natural-language question into a
     single read-only SPARQL SELECT query grounded in the schema above.
@@ -1639,19 +1690,18 @@ def _generate_sparql(question: str) -> Optional[str]:
     threat feeds) -- forcing a query in that case would just waste a
     round-trip returning nothing useful -- or if generation/the API key
     itself fails."""
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        logger.error("[text_to_sparql] OPENAI_API_KEY not set -- cannot generate a query")
+    configured = _configured_llm()
+    if configured is None:
         return None
+    client, model, provider = configured
     import uuid
     call_id = uuid.uuid4().hex
-    _eval_support.event('llm_started', call_id=call_id, model='gpt-4o', provider='openai')
+    _eval_support.event('llm_started', call_id=call_id, model=model, provider=provider)
     try:
-        client = OpenAI(api_key=api_key, **({'max_retries': 0, 'timeout': 45} if os.environ.get('PROPOSAL_TELEMETRY_PATH') else {}))
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            temperature=0,
-            messages=[
+        request_kwargs = {
+            "model": model,
+            "temperature": 0,
+            "messages": [
                 {
                     "role": "system",
                     "content": (
@@ -1664,7 +1714,10 @@ def _generate_sparql(question: str) -> Optional[str]:
                 },
                 {"role": "user", "content": question},
             ],
-        )
+        }
+        if provider == "openrouter":
+            request_kwargs["extra_body"] = {"provider": {"require_parameters": True}}
+        response = client.chat.completions.create(**request_kwargs)
         _eval_support.event('llm_completed', call_id=call_id, model=response.model,
             input_tokens=response.usage.prompt_tokens if response.usage else None,
             output_tokens=response.usage.completion_tokens if response.usage else None)

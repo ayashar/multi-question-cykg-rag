@@ -111,6 +111,17 @@ class ChatRequest(BaseModel):
     message: str
 
 
+def _resolve_case(case_id: str, lookback_hours: float) -> Optional[clustering.Case]:
+    """Resolve a case from the live feed, then from its durable snapshot.
+
+    The live lookup is still preferred so a newly discovered case always
+    reflects current graph data. Once an investigation has started, however,
+    its exact alert set is persisted and should remain reopenable even when a
+    historical lookback window no longer reaches it.
+    """
+    return clustering.find_case(case_id, lookback_hours=lookback_hours) or session.find_saved_case(case_id)
+
+
 @app.get("/cases")
 async def get_cases(lookback_hours: float = 24.0) -> list[clustering.Case]:
     return clustering.list_cases(lookback_hours=lookback_hours)
@@ -127,8 +138,10 @@ async def investigate_case(
     clustering.py), and re-clustering over a window that doesn't reach the
     case's alerts won't find it. Pass the same (or a wider) lookback_hours
     you used there, e.g. if you listed cases with a replayed historical
-    dataset far from wall-clock "now"."""
-    case = clustering.find_case(case_id, lookback_hours=lookback_hours)
+    dataset far from wall-clock "now". Previously investigated cases can
+    also be reopened from their durable case snapshot when reclustering no
+    longer reaches the original activity window."""
+    case = _resolve_case(case_id, lookback_hours)
     if case is None:
         raise HTTPException(
             status_code=404,
@@ -147,8 +160,9 @@ async def get_attack_graph(
     case_id: str, lookback_hours: float = clustering.DEFAULT_FIND_LOOKBACK_HOURS
 ) -> attack_graph.CaseAttackGraph:
     """Nodes/edges for the reconstructed attack graph (src/investigation/
-    attack_graph.py) -- same lookback_hours caveat as .../investigate."""
-    case = clustering.find_case(case_id, lookback_hours=lookback_hours)
+    attack_graph.py). The live lookup uses the supplied lookback; previously
+    investigated cases fall back to their durable case snapshot."""
+    case = _resolve_case(case_id, lookback_hours)
     if case is None:
         raise HTTPException(
             status_code=404,

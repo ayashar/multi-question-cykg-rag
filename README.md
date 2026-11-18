@@ -91,7 +91,11 @@ routes also require the verified Supabase UUID forwarded by Next.js as
 `X-CSKG-User-ID`; do not expose an unkeyed FastAPI service publicly.
 
 ```bash
-OPENAI_API_KEY=
+LLM_PROVIDER=openrouter
+LLM_MODEL_NAME=<provider/model-id>
+FAST_LLM_MODEL_NAME=<provider/model-id>
+LLM_REASONING_EFFORT=low
+OPENROUTER_API_KEY=
 LANGCHAIN_API_KEY=
 LANGCHAIN_TRACING_V2=
 LANGCHAIN_ENDPOINT=
@@ -181,7 +185,7 @@ uv run -m src.ingestion.run_live
 # or, for the small bundled sample instead of the full dataset:
 uv run -m src.ingestion.run_live --alerts-path data/alerts_sample.jsonl
 
-# 3. In a SEPARATE terminal, run the investigation API (needs NEO4J_AURA* + OPENAI_API_KEY in .env)
+# 3. In a SEPARATE terminal, run the investigation API (needs NEO4J_AURA* + the configured LLM credential in .env)
 uv run -m src.investigation.run_api
 ```
 
