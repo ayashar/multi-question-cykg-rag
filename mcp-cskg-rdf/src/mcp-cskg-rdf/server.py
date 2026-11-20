@@ -428,10 +428,10 @@ def execute_sparql_query(query: str, ctx: Context, include_description: bool = F
     bounded_query = cap_select_query(query)
 
     try:
+        logger.info("[SPARQL query]\n%s", bounded_query)
         results = graph.query(bounded_query)
         ctx.request_context.lifespan_context["metrics"]["queries"] += 1
         ctx.request_context.lifespan_context["metrics"]["total_time"] += time.time() - start_time
-        logger.info("[SPARQL query]\n%s", bounded_query)
         return format_sparql_results(results, include_description)
     except Exception as e:
         logger.error(f"SPARQL query error: {_describe_error(e)}")

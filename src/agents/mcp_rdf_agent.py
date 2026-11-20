@@ -22,6 +22,7 @@ import functools
 import json
 import os
 import logging
+import re
 import threading
 import tempfile
 import time
@@ -42,6 +43,10 @@ MCP_MAX_STEPS = max(1, int(os.environ.get("CSKG_MCP_MAX_STEPS", "5")))
 MCP_MAX_RESULT_ROWS = max(1, int(os.environ.get("CSKG_MAX_RESULT_ROWS", "10")))
 CSKG_TRACE_VALUE_CHARS = 12000
 CSKG_TRACE_EVENT_LIMIT = 300
+_SERVER_LOG_RECORD = re.compile(
+    r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} - .*? - "
+    r"(?:DEBUG|INFO|WARNING|ERROR|CRITICAL) - (.*)$"
+)
 
 # The MCP server is a child process. Its stderr is therefore not part of the
 # application's Python logging tree. Keep a bounded process-local relay so a
@@ -91,11 +96,18 @@ def _record_trace_event(source: str, message: str, *, level: str = "INFO", **fie
                 "type": "cskg",
                 "phase": source,
                 "message": _clip(message, 240),
+                # Keep the compact message for the live timeline, but send
+                # the bounded full event as an expandable detail as well.
+                # The trace already uses this same bound, so the live and
+                # completed views do not disagree about what was recorded.
+                "details": _clip(message),
                 "level": level,
             }
             for field in ("tool", "status"):
                 if field in fields:
                     live_event[field] = fields[field]
+            if "query" in fields:
+                live_event["query"] = _clip(fields["query"])
             bus.publish(case_id, live_event)
     except Exception:
         # Live observability must never break a retrieval.
@@ -123,14 +135,32 @@ class _CskgServerLogFile:
             text = self._file.read().decode("utf-8", errors="replace")
             new_text = text[self._read_chars:]
             self._read_chars = len(text)
-        return [{"ts": time.time(), "message": _clip(line.strip())}
-                for line in new_text.splitlines() if line.strip()]
+        records = []
+        current = None
+        for raw_line in new_text.splitlines():
+            line = raw_line.rstrip()
+            if not line.strip():
+                continue
+            match = _SERVER_LOG_RECORD.match(line)
+            if match:
+                if current is not None:
+                    records.append(current)
+                current = {"ts": time.time(), "message": match.group(1).strip()}
+            elif current is not None:
+                current["message"] = f'{current["message"]}\n{line.strip()}'
+            else:
+                current = {"ts": time.time(), "message": line.strip()}
+        if current is not None:
+            records.append(current)
+        for record in records:
+            record["message"] = _clip(record["message"])
+        return records
 
 
 _server_log_sinks: list[_CskgServerLogFile] = []
 
 
-def _capture_server_logs() -> None:
+def _capture_server_logs() -> list[dict]:
     records = []
     for sink in list(_server_log_sinks):
         try:
@@ -138,11 +168,23 @@ def _capture_server_logs() -> None:
         except Exception:
             continue
     if not records:
-        return
+        return []
     with _server_log_lock:
         _server_log_buffer.extend(records)
         if len(_server_log_buffer) > CSKG_TRACE_EVENT_LIMIT * 4:
             del _server_log_buffer[:-CSKG_TRACE_EVENT_LIMIT * 4]
+    return records
+
+
+def _publish_live_sparql_queries(records: list[dict]) -> None:
+    marker = "[SPARQL query]"
+    for record in records:
+        message = record.get("message")
+        if not isinstance(message, str) or not message.startswith(marker):
+            continue
+        query = message[len(marker):].lstrip(" :\n")
+        if query:
+            _record_trace_event("sparql_query", "SPARQL query started", query=query, status="running")
 
 
 class _McpTraceLogHandler(logging.Handler):
@@ -189,6 +231,15 @@ def _instrument_connector(connector: object) -> None:
         }
         if trace is not None:
             trace.setdefault("tool_calls", []).append(call)
+        stop_relay = asyncio.Event()
+
+        async def relay_server_logs() -> None:
+            while not stop_relay.is_set():
+                _publish_live_sparql_queries(_capture_server_logs())
+                await asyncio.sleep(0.05)
+            _publish_live_sparql_queries(_capture_server_logs())
+
+        relay_task = asyncio.create_task(relay_server_logs())
         try:
             result = await original(tool_name, arguments)
         except Exception as exc:
@@ -198,6 +249,9 @@ def _instrument_connector(connector: object) -> None:
             })
             _record_trace_event("mcp_tool", f"{tool_name} failed: {type(exc).__name__}: {exc}", level="ERROR")
             raise
+        finally:
+            stop_relay.set()
+            await relay_task
         call.update({
             "result": _clip(_tool_result_text(result)),
             "is_error": bool(getattr(result, "isError", False)),
@@ -329,7 +383,7 @@ You are a specialized cybersecurity assistant. You MUST answer questions ONLY by
 
 Keep retrieval bounded: use the fewest tool calls that can answer the question, prefer one precise lookup, and do not request exhaustive lists. If a call times out, do not repeat the same query; make at most one narrower fallback. The tool loop is limited to {MCP_MAX_STEPS} steps, and each result is capped at {MCP_MAX_RESULT_ROWS} rows.
 
-When asked to map observed behavior to ATT&CK techniques and/or recommend mitigations, use get_technique_mitigations_by_keyword with a list of up to three concise phrases drawn from the observed signals (for example, the relevant service behavior, a scan/banner phrase, and a DNS query type). Make one call; only if it returns no results, make one fallback call with alternate short phrases. It returns bounded technique IDs/titles and linked mitigation titles. Never use text_to_sparql for these tasks: it makes a separate hard-coded OpenAI GPT-4o API call, bypassing the configured OpenRouter model/provider. Do not replace graph evidence with memory, or search technique and mitigation tools separately.
+When asked to map observed behavior to ATT&CK techniques and/or recommend mitigations, use get_technique_mitigations_by_keyword with a list of up to three concise phrases drawn from the observed signals (for example, the relevant service behavior, a scan/banner phrase, and a DNS query type). Make one call; only if it returns no results, make one fallback call with alternate short phrases. It returns bounded technique IDs/titles and linked mitigation titles. Never use text_to_sparql for these tasks: it is a separate, more expensive LLM fallback rather than the purpose-built lookup. Do not replace graph evidence with memory, or search technique and mitigation tools separately.
 
 This knowledge base ONLY contains public reference data: MITRE ATT&CK techniques/tactics/groups/software/mitigations,
 and CVE/CVSS records. It has NO IP addresses, hostnames, domains, live threat-intelligence feeds, IOC reputation data,
@@ -389,6 +443,7 @@ async def run_mcp_agent(question: str) -> str:
         "readiness": None,
         "events": [],
         "tool_calls": [],
+        "queries": [],
         "server_logs": [],
     }
     _active_cskg_trace.set(trace)
@@ -411,7 +466,7 @@ async def run_mcp_agent(question: str) -> str:
             # A focused ATT&CK mapping query has a single purpose-built tool.
             # Discover its registered name first, then hide the other 42
             # options from the agent so it cannot spend its budget on broad
-            # searches or text_to_sparql's separate OpenAI API call.
+            # searches or text_to_sparql's separate fallback LLM call.
             allowed = "get_technique_mitigations_by_keyword"
             if allowed not in tool_names:
                 raise CskgDependencyError(
@@ -466,9 +521,21 @@ async def run_mcp_agent(question: str) -> str:
             f"CSKG agent run failed: {type(e).__name__}: {e or 'no message'}", stage="agent_run") from e
     finally:
         trace["server_logs"] = _server_logs_since(server_log_start)
+        trace["queries"] = _sparql_queries(trace["server_logs"])
 
 
 def _server_logs_since(start: int) -> list[dict]:
     _capture_server_logs()
     with _server_log_lock:
         return list(_server_log_buffer[start:])
+
+
+def _sparql_queries(records: list[dict]) -> list[dict]:
+    marker = "[SPARQL query]"
+    return [
+        {"ts": record.get("ts"), "query": record["message"][len(marker):].lstrip(" :\n")}
+        for record in records
+        if isinstance(record.get("message"), str)
+        and record["message"].startswith(marker)
+        and record["message"][len(marker):].strip()
+    ]

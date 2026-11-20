@@ -81,8 +81,10 @@ test("SSE stream maps backend steps and logs into frontend progress events", asy
   });
   source.emit("cskg", {
     type: "cskg",
-    phase: "mcp",
-    message: "MCP handshake completed",
+    phase: "sparql_query",
+    message: "SPARQL query started",
+    query: "SELECT ?techniqueId WHERE { ?techniqueId ?p ?o }",
+    status: "running",
     level: "INFO",
   });
 
@@ -95,6 +97,8 @@ test("SSE stream maps backend steps and logs into frontend progress events", asy
   assert.equal(events[2].message, "Generated investigation questions.");
   assert.equal(events[3].agent, "cskg");
   assert.equal(events[3].label, "CSKG / MCP");
+  assert.equal(events[3].query, "SELECT ?techniqueId WHERE { ?techniqueId ?p ?o }");
+  assert.equal(events[3].status, "running");
   stream.close();
   assert.equal(source.closed, true);
 });

@@ -82,9 +82,11 @@ export interface InvestigationServerEvent {
   agent?: string;
   level?: string;
   message?: string;
+  details?: string;
   phase?: string;
   tool?: string;
   status?: string;
+  query?: string;
   error?: string | null;
   latency_seconds?: number;
 }
@@ -100,8 +102,12 @@ export interface InvestigationProgressEvent {
   timestamp: string;
   elapsed_seconds?: number;
   level?: string;
+  details?: string;
   source?: "backend" | "frontend";
   result?: TurnRecord;
+  phase?: string;
+  tool?: string;
+  query?: string;
 }
 
 export type AttackGraphNodeType =

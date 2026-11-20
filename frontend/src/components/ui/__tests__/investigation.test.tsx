@@ -53,6 +53,41 @@ test("activity log keeps raw details out of simplified mode", () => {
   assert.doesNotMatch(html, /SELECT DISTINCT \?techniqueId/);
 });
 
+test("live CSKG result keeps a compact preview with expandable full detail", () => {
+  const fullResult = "Tool result: techniqueId: T1098.001 | techniqueLabel: Additional Cloud Credentials | mitigationLabel: Disable or remove unnecessary cloud credentials and review all active access paths.";
+  const html = renderToStaticMarkup(<InvestigationActivityLog
+    events={[{
+      type: "log",
+      agent: "cskg",
+      label: "CSKG / MCP",
+      message: "Tool result: techniqueId: T1098.001 | techniqueLabel: Additional Cloud Credentials | mitigationLabel: Disable ...",
+      details: fullResult,
+      timestamp: "2026-09-29T00:00:00Z",
+    }]}
+  />);
+  assert.match(html, /See full CSKG detail/);
+  assert.match(html, /review all active access paths/);
+});
+
+test("activity log places live CSKG queries inside the shared event timeline", () => {
+  const html = renderToStaticMarkup(<InvestigationActivityLog
+    events={[{
+      type: "log",
+      agent: "cskg",
+      label: "CSKG / MCP",
+      message: "SPARQL query started",
+      query: "\n        SELECT ?techniqueId\n        WHERE { ?techniqueId ?p ?o }\n      ",
+      status: "running",
+      timestamp: "2026-09-29T00:00:00Z",
+    }]}
+    initialMode="detailed"
+  />);
+  assert.doesNotMatch(html, /Live CSKG queries/);
+  assert.match(html, /CSKG SPARQL/);
+  assert.doesNotMatch(html, /SPARQL query started/);
+  assert.match(html, /SELECT \?techniqueId\nWHERE \{ \?techniqueId \?p \?o \}/);
+});
+
 test("completed agent logs remain available in the details view", () => {
   const html = renderToStaticMarkup(<InvestigationLog events={[
     { type: "agent", status: "complete", agent: "guardrails", agent_id: "agent.guardrails", label: "Guardrails Agent", messages: ["Decision: relevant"], timestamp: "2026-09-29T00:00:00Z", elapsed_seconds: 0.5 },
@@ -142,14 +177,31 @@ test("chatroom exposes raw retrieval queries in detailed activity mode", () => {
     events={[]}
     initialMode="detailed"
     trace={{
-      retrievals: [{ source: "cypher", queries: { generated: "MATCH (a:Alert) RETURN a" } }],
+      retrievals: [{
+        source: "cypher",
+        hypothesis: "Repeated source activity may indicate coordinated access.",
+        question: "Does the same source recur across the alert set?",
+        rationale: "Check recurrence before escalating the case.",
+        turn: 1,
+        status: "ok",
+        seconds: 0.8,
+        verdict: "supports hypothesis",
+        sufficient: true,
+        reasoning: "The source appears across three related alerts.",
+        queries: { generated: "MATCH (a:Alert) RETURN a" },
+      }],
       log: [],
     }}
   />);
   assert.match(html, /Detailed raw/);
-  assert.match(html, /Database and retrieval queries/);
   assert.match(html, /Neo4j Cypher/);
   assert.match(html, /MATCH \(a:Alert\) RETURN a/);
+  assert.match(html, /See investigation chain/);
+  assert.match(html, /Repeated source activity may indicate coordinated access\./);
+  assert.match(html, /Does the same source recur across the alert set\?/);
+  assert.match(html, /cypher · ok · 0\.80s · turn 1/);
+  assert.match(html, /supports hypothesis · sufficient/);
+  assert.match(html, /The source appears across three related alerts\./);
 });
 
 test("chatroom exposes CSKG MCP internals in detailed activity mode", () => {
@@ -161,6 +213,7 @@ test("chatroom exposes CSKG MCP internals in detailed activity mode", () => {
         retrieval_index: 0,
         question: "Which mitigations apply?",
         server: { name: "rdf_explorer" },
+        queries: [{ ts: 1794833442.2184, query: "\n          SELECT DISTINCT ?techniqueId\n          WHERE { ?techniqueId ?predicate ?value }\n        " }],
         tool_calls: [{ name: "get_technique_mitigations_by_keyword", result: "M1053" }],
         server_logs: [{ message: "SELECT DISTINCT ?techniqueId" }],
       }],
@@ -168,8 +221,15 @@ test("chatroom exposes CSKG MCP internals in detailed activity mode", () => {
     }}
   />);
   assert.match(html, /CSKG \/ MCP internals/);
-  assert.match(html, /1 tool call\(s\) · 1 server log line\(s\)/);
-  assert.match(html, /See more CSKG details/);
+  assert.match(html, /Trace size/);
+  assert.match(html, /0 events · 1 tool call · 1 query · 1 server log line/);
+  assert.match(html, /CSKG SPARQL/);
+  assert.match(html, /SPARQL query/);
+  assert.match(html, /SELECT DISTINCT \?techniqueId/);
+  assert.match(html, /Server configuration and readiness/);
+  assert.match(html, /Tool calls \(1\)/);
+  assert.match(html, /CSKG server log \(1 line\)/);
+  assert.match(html, /See more CSKG details · complete raw payload/);
   assert.match(html, /<details class="mt-1/);
   assert.doesNotMatch(html, /<details[^>]* open/);
   assert.match(html, /get_technique_mitigations_by_keyword/);
