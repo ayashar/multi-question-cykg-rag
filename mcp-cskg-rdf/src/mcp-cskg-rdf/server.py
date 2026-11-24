@@ -428,7 +428,10 @@ def execute_sparql_query(query: str, ctx: Context, include_description: bool = F
     bounded_query = cap_select_query(query)
 
     try:
-        logger.info("[SPARQL query]\n%s", bounded_query)
+        # Keep the query in one log record. The parent process polls stderr
+        # while the tool is running; a multiline record can be split across
+        # polls, leaving the live event with only the marker and no query.
+        logger.info("[SPARQL query] %s", json.dumps(bounded_query, ensure_ascii=False))
         results = graph.query(bounded_query)
         ctx.request_context.lifespan_context["metrics"]["queries"] += 1
         ctx.request_context.lifespan_context["metrics"]["total_time"] += time.time() - start_time
