@@ -7,6 +7,7 @@ import {
   investigateCase,
   getAttackGraph,
   investigateTimeRange,
+  resolveTimeRange,
   sendChatMessage,
   getChatTranscript,
   getTurnTrace,
@@ -338,6 +339,22 @@ describe("API Client Suite", () => {
       assert.equal(res.edges[0].relation, "HAS_ALERT");
       assert.equal(res.root_cause_alert_id, "a1");
       assert.deepEqual(res.chain_order, ["a1"]);
+    });
+
+    it("resolveTimeRange gets the case id for a manual range", async () => {
+      setupMockFetch({ case_id: "range-case", alert_ids: ["a1"] });
+      const res = await resolveTimeRange({
+        start: "2026-09-01T00:00:00Z",
+        end: "2026-09-01T04:00:00Z",
+      });
+
+      assert.ok(lastCall);
+      assert.equal(lastCall.options?.method, "GET");
+      const url = new URL(lastCall.url);
+      assert.equal(url.pathname, "/investigations/time-range/resolve");
+      assert.equal(url.searchParams.get("start"), "2026-09-01T00:00:00Z");
+      assert.equal(url.searchParams.get("end"), "2026-09-01T04:00:00Z");
+      assert.equal(res.case_id, "range-case");
     });
 
     it("investigateTimeRange posts correct body and parses TurnRecord", async () => {
