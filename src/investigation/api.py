@@ -10,6 +10,7 @@ Routes:
   GET  /cases                          ranked list of recent activity cases
   POST /cases/{case_id}/investigate    launch/resume a case's investigation
   GET  /cases/{case_id}/attack-graph   reconstructed attack graph for a case
+  GET  /investigations/time-range/resolve  resolve an ad-hoc range to a case id
   POST /investigations/time-range      launch/resume an ad-hoc time-range investigation
   GET  /investigations                 past conversations, most recent first (to resume one)
   GET  /investigations/{case_id}       one conversation's summary (incl. whether it can be resumed)
@@ -182,6 +183,16 @@ async def investigate_time_range(
         raise HTTPException(status_code=404, detail=f"No alerts found between {body.start} and {body.end}.")
     alerts = clustering.fetch_alerts_by_ids(case.alert_ids)
     return await session.start_investigation(user_id, case, alerts)
+
+
+@app.get("/investigations/time-range/resolve")
+async def resolve_time_range(start: str, end: str) -> clustering.Case:
+    """Resolve a manual range before starting it so the frontend can subscribe
+    to the case-scoped live event stream before the investigation POST."""
+    case = clustering.case_from_range(start, end)
+    if case is None:
+        raise HTTPException(status_code=404, detail=f"No alerts found between {start} and {end}.")
+    return case
 
 
 @app.get("/investigations")
