@@ -198,6 +198,7 @@ export type ApiEndpointKey =
   | "investigateCase"
   | "getAttackGraph"
   | "investigateTimeRange"
+  | "resolveTimeRange"
   | "sendChatMessage"
   | "getChatTranscript"
   | "listInvestigations"
