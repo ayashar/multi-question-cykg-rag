@@ -43,6 +43,7 @@ MCP_MAX_STEPS = max(1, int(os.environ.get("CSKG_MCP_MAX_STEPS", "5")))
 MCP_MAX_RESULT_ROWS = max(1, int(os.environ.get("CSKG_MAX_RESULT_ROWS", "10")))
 CSKG_TRACE_VALUE_CHARS = 12000
 CSKG_TRACE_EVENT_LIMIT = 300
+SPARQL_LOG_MARKER = "[SPARQL query]"
 _SERVER_LOG_RECORD = re.compile(
     r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} - .*? - "
     r"(?:DEBUG|INFO|WARNING|ERROR|CRITICAL) - (.*)$"
@@ -177,14 +178,25 @@ def _capture_server_logs() -> list[dict]:
 
 
 def _publish_live_sparql_queries(records: list[dict]) -> None:
-    marker = "[SPARQL query]"
     for record in records:
-        message = record.get("message")
-        if not isinstance(message, str) or not message.startswith(marker):
-            continue
-        query = message[len(marker):].lstrip(" :\n")
+        query = _sparql_query_from_log_message(record.get("message"))
         if query:
             _record_trace_event("sparql_query", "SPARQL query started", query=query, status="running")
+
+
+def _sparql_query_from_log_message(message: object) -> str | None:
+    """Extract a query from both the new one-line and legacy log formats."""
+    if not isinstance(message, str) or not message.startswith(SPARQL_LOG_MARKER):
+        return None
+    payload = message[len(SPARQL_LOG_MARKER):].lstrip(" :\n")
+    if not payload:
+        return None
+    try:
+        decoded = json.loads(payload)
+    except (json.JSONDecodeError, TypeError):
+        decoded = payload
+    query = decoded if isinstance(decoded, str) else payload
+    return query.strip() or None
 
 
 class _McpTraceLogHandler(logging.Handler):
@@ -531,11 +543,8 @@ def _server_logs_since(start: int) -> list[dict]:
 
 
 def _sparql_queries(records: list[dict]) -> list[dict]:
-    marker = "[SPARQL query]"
     return [
-        {"ts": record.get("ts"), "query": record["message"][len(marker):].lstrip(" :\n")}
+        {"ts": record.get("ts"), "query": query}
         for record in records
-        if isinstance(record.get("message"), str)
-        and record["message"].startswith(marker)
-        and record["message"][len(marker):].strip()
+        if (query := _sparql_query_from_log_message(record.get("message")))
     ]
