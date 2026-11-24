@@ -1,7 +1,8 @@
 import {
-  ApiClientError, getApiConfig, getCaseLookback, investigateCaseStream, investigateTimeRange,
+  ApiClientError, getApiConfig, getCaseLookback, investigateCaseStream, investigateTimeRange, resolveTimeRange,
   registerCaseLookback, resolveCaseLookback, type Case, type InvestigationProgressEvent, type TimeRangeRequest, type TurnRecord,
 } from "@/api";
+import { runWithInvestigationEventStream } from "@/api/investigation-events";
 import { getCases, getInvestigatedCases } from "@/modules/cases/services/cases-service";
 import { getActiveAccountId } from "@/lib/supabase/investigation-store";
 import { createDemoTimeRangeInvestigation as createApiDemoTimeRangeInvestigation } from "@/demo/demo-data";
@@ -201,8 +202,30 @@ export async function runTimeRangeInvestigation(
   const started = Date.now();
   onProgress?.(timeRangeAgentEvent(TIME_RANGE_AGENTS[0], "running", started));
   try {
-    const result = await investigateTimeRange(range);
-    TIME_RANGE_AGENTS.forEach((stage) => onProgress?.(timeRangeAgentEvent(stage, "complete", started)));
+    let caseId: string | undefined;
+    try {
+      caseId = (await resolveTimeRange(range)).case_id;
+    } catch {
+      // Keep compatibility with older deployments that do not have the
+      // resolve endpoint yet. The POST still returns the final result.
+    }
+
+    let backendEvents = 0;
+    const track = (event: InvestigationProgressEvent) => {
+      if (event.source === "backend") backendEvents++;
+      onProgress?.(event);
+    };
+    const finishWithoutLiveStream = async () => {
+      const result = await investigateTimeRange(range);
+      TIME_RANGE_AGENTS.forEach((stage) => onProgress?.(timeRangeAgentEvent(stage, "complete", started)));
+      return result;
+    };
+    const result = caseId
+      ? await runWithInvestigationEventStream(caseId, () => investigateTimeRange(range), track, finishWithoutLiveStream)
+      : await finishWithoutLiveStream();
+    if (caseId && backendEvents === 0) {
+      TIME_RANGE_AGENTS.forEach((stage) => onProgress?.(timeRangeAgentEvent(stage, "complete", started)));
+    }
     onProgress?.({ type: "result", result, timestamp: new Date().toISOString() });
     return result;
   } catch (reason) {
